@@ -67,6 +67,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.graphics.shapes.RoundedPolygon
 import androidx.navigation.NavController
 import coil3.compose.AsyncImage
+import coil3.compose.SubcomposeAsyncImage
 import com.metrolist.innertube.models.WatchEndpoint
 import com.metrolist.music.BuildConfig
 import com.metrolist.music.LocalPlayerAwareWindowInsets
@@ -171,7 +172,13 @@ private fun ContributorAvatar(
     contentDescription: String? = null,
     onClick: (() -> Unit)? = null
 ) {
-    val fallback = painterResource(R.drawable.small_icon)
+    val fallback = @Composable {
+        Icon(
+            painter = painterResource(R.drawable.small_icon),
+            contentDescription = null,
+            modifier = Modifier.padding(sizeDp.div(4).dp)
+        )
+    }
     Surface(
         onClick = onClick ?: {},
         enabled = onClick != null,
@@ -180,14 +187,17 @@ private fun ContributorAvatar(
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         tonalElevation = 4.dp,
     ) {
-        AsyncImage(
+        SubcomposeAsyncImage(
             model = avatarUrl,
             contentDescription = contentDescription,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
-            placeholder = fallback,
-            fallback = fallback,
-            error = fallback,
+            loading = {
+                fallback()
+            },
+            error = {
+                fallback()
+            }
         )
     }
 }
@@ -261,7 +271,7 @@ private fun ActionCard(
                     )
                 }
             }
-            
+
             Spacer(Modifier.width(20.dp))
             Column {
                 Text(
@@ -293,7 +303,7 @@ fun AboutScreen(
     val localSnackbarHostState = remember { SnackbarHostState() }
     val wannaPlayStr = stringResource(R.string.wanna_play_favorite_song)
     val yeahStr = stringResource(R.string.yeah)
-    
+
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -312,9 +322,9 @@ fun AboutScreen(
                     LocalPlayerAwareWindowInsets.current.only(WindowInsetsSides.Top)
                 )
             )
-    
+
             Spacer(Modifier.height(16.dp))
-    
+
             Surface(
                 shape = RoundedCornerShape(32.dp),
                 color = MaterialTheme.colorScheme.surfaceContainer,
@@ -343,9 +353,23 @@ fun AboutScreen(
                             modifier = Modifier.size(40.dp)
                         )
                     }
-            
+
                     Spacer(Modifier.height(16.dp))
-            
+
+                    Text(
+                        text = stringResource(R.string.app_name),
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        letterSpacing = MaterialTheme.typography.headlineMedium.letterSpacing
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = "fork from",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
                     Text(
                         text = stringResource(R.string.metrolist),
                         style = MaterialTheme.typography.headlineMedium,
@@ -353,9 +377,9 @@ fun AboutScreen(
                         color = MaterialTheme.colorScheme.onSurface,
                         letterSpacing = MaterialTheme.typography.headlineMedium.letterSpacing
                     )
-            
+
                     Spacer(Modifier.height(8.dp))
-            
+
                     Surface(
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.secondaryContainer
@@ -376,9 +400,9 @@ fun AboutScreen(
                     }
                 }
             }
-    
+
             Spacer(Modifier.height(32.dp))
-    
+
             LinearWavyProgressIndicator(
                 progress = { 1f },
                 modifier = Modifier
@@ -388,13 +412,13 @@ fun AboutScreen(
                 trackColor = Color.Transparent,
                 amplitude = { 1f }
             )
-    
+
             Spacer(Modifier.height(32.dp))
-    
+
             SectionHeader(stringResource(R.string.credits_lead_developer))
-    
+
             var leadClickCount by remember(leadDeveloper.name) { mutableIntStateOf(0) }
-    
+
             // Large Avatar
             ContributorAvatar(
                 avatarUrl = leadDeveloper.avatarUrl,
@@ -414,18 +438,18 @@ fun AboutScreen(
                     )
                 }
             )
-    
+
             Spacer(Modifier.height(24.dp))
-    
+
             Text(
                 text = leadDeveloper.name,
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
             )
-    
+
             Spacer(Modifier.height(32.dp))
-    
+
             // Segmented buttons (Website, GitHub, Instagram)
             Surface(
                 shape = RoundedCornerShape(24.dp),
@@ -441,18 +465,18 @@ fun AboutScreen(
                         iconSize = 24.dp,
                         onClick = { uriHandler.openUri("https://metrolist.meowery.eu") }
                     )
-                    
+
                     Box(modifier = Modifier.width(1.dp).height(72.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha=0.5f)))
-                    
+
                     SegmentedActionButton(
                         label = stringResource(R.string.credits_github),
                         iconRes = R.drawable.github,
                         iconSize = 24.dp,
                         onClick = { uriHandler.openUri("https://github.com/mostafaalagamy") }
                     )
-                    
+
                     Box(modifier = Modifier.width(1.dp).height(72.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha=0.5f)))
-                    
+
                     SegmentedActionButton(
                         label = stringResource(R.string.credits_instagram),
                         iconRes = R.drawable.instagram,
@@ -461,20 +485,20 @@ fun AboutScreen(
                     )
                 }
             }
-    
+
             Spacer(Modifier.height(16.dp))
-    
+
             ActionCard(
                 title = stringResource(R.string.like_what_i_do),
                 subtitle = stringResource(R.string.buy_mo_a_coffee),
                 iconRes = R.drawable.buymeacoffee,
                 onClick = { uriHandler.openUri("https://buymeacoffee.com/mostafaalagamy") }
             )
-    
+
             Spacer(Modifier.height(48.dp))
-    
+
             SectionHeader(stringResource(R.string.credits_collaborators_section))
-    
+
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -523,7 +547,7 @@ fun AboutScreen(
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                             modifier = Modifier.clickable { uriHandler.openUri(contributor.githubUrl) }
                         )
-                        
+
                         if (index < collaborators.lastIndex) {
                             HorizontalDivider(
                                 modifier = Modifier.padding(horizontal = 20.dp),
@@ -533,11 +557,11 @@ fun AboutScreen(
                     }
                 }
             }
-    
+
             Spacer(Modifier.height(32.dp))
-    
+
             SectionHeader(stringResource(R.string.community_and_info))
-    
+
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -556,7 +580,7 @@ fun AboutScreen(
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                             modifier = Modifier.clickable { uriHandler.openUri(link.url) }
                         )
-                        
+
                         if (index < communityLinks.lastIndex) {
                             HorizontalDivider(
                                 modifier = Modifier.padding(horizontal = 20.dp),
@@ -566,16 +590,16 @@ fun AboutScreen(
                     }
                 }
             }
-    
+
             Spacer(Modifier.height(32.dp))
-            
+
             Text(
                 text = stringResource(R.string.stands_with_palestine),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            
+
             Spacer(Modifier.height(40.dp))
         }
 
