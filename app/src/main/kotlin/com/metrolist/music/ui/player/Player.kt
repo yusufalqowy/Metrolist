@@ -16,6 +16,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FloatSpringSpec
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -40,6 +41,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -60,8 +62,14 @@ import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledIconToggleButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilledTonalIconToggleButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonColors
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.IconToggleButtonColors
+import androidx.compose.material3.IconToggleButtonShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.ProvideTextStyle
@@ -187,7 +195,7 @@ import com.metrolist.music.constants.SleepTimerFadeOutKey
 import com.metrolist.music.constants.SleepTimerStopAfterCurrentSongKey
 
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun BottomSheetPlayer(
     state: BottomSheetState,
@@ -1462,11 +1470,11 @@ fun BottomSheetPlayer(
                             val playPauseWeight by animateFloatAsState(
                                 targetValue =
                                     if (isPlayPausePressed) {
-                                        1.9f
+                                        2.2f
                                     } else if (isBackPressed || isNextPressed) {
-                                        1.1f
+                                        1.8f
                                     } else {
-                                        1.3f
+                                        2f
                                     },
                                 animationSpec =
                                     spring(
@@ -1479,11 +1487,11 @@ fun BottomSheetPlayer(
                             val backButtonWeight by animateFloatAsState(
                                 targetValue =
                                     if (isBackPressed) {
-                                        0.65f
+                                        1.2f
                                     } else if (isPlayPausePressed) {
-                                        0.35f
+                                        0.8f
                                     } else {
-                                        0.45f
+                                       1f
                                     },
                                 animationSpec =
                                     spring(
@@ -1496,11 +1504,11 @@ fun BottomSheetPlayer(
                             val nextButtonWeight by animateFloatAsState(
                                 targetValue =
                                     if (isNextPressed) {
-                                        0.65f
+                                        1.2f
                                     } else if (isPlayPausePressed) {
-                                        0.35f
+                                        0.8f
                                     } else {
-                                        0.45f
+                                        1f
                                     },
                                 animationSpec =
                                     spring(
@@ -1534,11 +1542,12 @@ fun BottomSheetPlayer(
 
                             Spacer(modifier = Modifier.width(8.dp))
 
-                            FilledIconButton(
-                                onClick = {
+                            FilledIconToggleButton(
+                                checked = effectiveIsPlaying,
+                                onCheckedChange = {
                                     if (isListenTogetherGuest) {
                                         playerConnection.toggleMute()
-                                        return@FilledIconButton
+                                        return@FilledIconToggleButton
                                     }
                                     if (isCasting) {
                                         if (castIsPlaying) {
@@ -1553,12 +1562,14 @@ fun BottomSheetPlayer(
                                         playerConnection.togglePlayPause()
                                     }
                                 },
-                                shape = RoundedCornerShape(50),
+                                shapes = IconButtonDefaults.toggleableShapes(pressedShape = IconButtonDefaults.largePressedShape, checkedShape = IconButtonDefaults.mediumSelectedRoundShape),
                                 interactionSource = playPauseInteractionSource,
                                 colors =
-                                    IconButtonDefaults.filledIconButtonColors(
+                                    IconButtonDefaults.filledIconToggleButtonColors(
                                         containerColor = textButtonColor,
                                         contentColor = iconButtonColor,
+                                        checkedContainerColor = textButtonColor,
+                                        checkedContentColor = iconButtonColor,
                                     ),
                                 modifier =
                                     Modifier
