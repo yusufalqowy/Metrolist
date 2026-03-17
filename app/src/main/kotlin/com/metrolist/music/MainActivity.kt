@@ -17,6 +17,7 @@ import android.os.Bundle
 import android.os.IBinder
 import android.view.View
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
@@ -122,8 +123,10 @@ import coil3.request.allowHardware
 import coil3.request.crossfade
 import coil3.toBitmap
 import com.metrolist.innertube.YouTube
+import com.metrolist.innertube.YouTube.queue
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
+import com.metrolist.innertube.models.YouTubeClient
 import com.metrolist.music.constants.AppBarHeight
 import com.metrolist.music.constants.AppLanguageKey
 import com.metrolist.music.constants.CheckForUpdatesKey
@@ -132,6 +135,7 @@ import com.metrolist.music.constants.DefaultOpenTabKey
 import com.metrolist.music.constants.DisableScreenshotKey
 import com.metrolist.music.constants.DynamicThemeKey
 import com.metrolist.music.constants.EnableHighRefreshRateKey
+import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.constants.LastSeenVersionKey
 import com.metrolist.music.constants.ListenTogetherInTopBarKey
 import com.metrolist.music.constants.ListenTogetherUsernameKey
@@ -1323,40 +1327,35 @@ class MainActivity : ComponentActivity() {
 
                 val playlistId = uri.getQueryParameter("list")
 
-                if (videoId != null) {
-                    coroutineScope.launch(Dispatchers.IO) {
-                        YouTube
-                            .queue(listOf(videoId), playlistId)
-                            .onSuccess { queue ->
-                                withContext(Dispatchers.Main) {
-                                    playerConnection?.playQueue(
-                                        YouTubeQueue(
-                                            WatchEndpoint(videoId = queue.firstOrNull()?.id, playlistId = playlistId),
-                                            queue.firstOrNull()?.toMediaMetadata(),
-                                        ),
-                                    )
-                                }
-                            }.onFailure {
-                                reportException(it)
+                if (!playlistId.isNullOrEmpty()){
+                    when(playlistId){
+                        "LM" ->{
+                            val loginCookie = dataStore.get(InnerTubeCookieKey, "")
+                            if (loginCookie.isNotEmpty()){
+                                navController.navigate("online_playlist/$playlistId?requestToPlay=true")
+                            }else{
+                                Toast.makeText(this,"Login to view your liked music!", Toast.LENGTH_LONG).show()
                             }
+                        }
+                        else -> navController.navigate("online_playlist/$playlistId?requestToPlay=true")
                     }
-                } else if (playlistId != null) {
+                }else if(!videoId.isNullOrEmpty()){
                     coroutineScope.launch(Dispatchers.IO) {
                         YouTube
-                            .queue(null, playlistId)
-                            .onSuccess { queue ->
-                                val firstItem = queue.firstOrNull()
+                            .player(videoId = videoId, client = YouTubeClient.WEB_REMIX)
+                            .onSuccess { result ->
+                                val videoDetails = result.videoDetails
+                                Timber.e("Video details: $videoDetails")
                                 withContext(Dispatchers.Main) {
                                     playerConnection?.playQueue(
                                         YouTubeQueue(
-                                            WatchEndpoint(videoId = firstItem?.id, playlistId = playlistId),
-                                            firstItem?.toMediaMetadata(),
+                                            WatchEndpoint(videoId = videoDetails?.videoId ?: videoId,),
+                                            videoDetails?.toMediaMetadata(),
                                         ),
                                     )
                                 }
-                            }.onFailure {
-                                reportException(it)
                             }
+                            .onFailure { reportException(it) }
                     }
                 }
             }
