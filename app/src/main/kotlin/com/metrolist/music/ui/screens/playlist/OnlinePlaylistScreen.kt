@@ -195,6 +195,7 @@ fun OnlinePlaylistScreen(
                 initialContinuation = viewModel.continuation,
             )
         )
+        viewModel.consumePlayRequest()
     }
 
     if (isSearching) {

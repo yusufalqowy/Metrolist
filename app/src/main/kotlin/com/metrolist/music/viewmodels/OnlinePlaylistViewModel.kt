@@ -41,7 +41,9 @@ class OnlinePlaylistViewModel @Inject constructor(
     private val database: MusicDatabase
 ) : ViewModel() {
     private val playlistId = savedStateHandle.get<String>("playlistId")!!
-    val requestToPlay = savedStateHandle.get<Boolean>("requestToPlay") ?: false
+    private var _requestToPlay = savedStateHandle.get<Boolean>("requestToPlay") ?: false
+    val requestToPlay = _requestToPlay
+
 
     // Check if this is a special podcast playlist (with or without VL prefix)
     private val normalizedPlaylistId = playlistId.removePrefix("VL")
@@ -276,5 +278,9 @@ class OnlinePlaylistViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         proactiveLoadJob?.cancel()
+    }
+
+    fun consumePlayRequest() {
+        _requestToPlay = false
     }
 }
