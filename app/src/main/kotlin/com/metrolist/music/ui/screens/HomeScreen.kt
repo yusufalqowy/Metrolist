@@ -61,7 +61,6 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -87,6 +86,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import coil3.compose.AsyncImage
@@ -216,7 +216,7 @@ fun CommunityPlaylistCard(
             MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         }
 
-    val dbPlaylist by database.playlistByBrowseId(item.playlist.id).collectAsState(initial = null)
+    val dbPlaylist by database.playlistByBrowseId(item.playlist.id).collectAsStateWithLifecycle(initialValue = null)
     val isBookmarked = dbPlaylist?.playlist?.bookmarkedAt != null
 
     Card(
@@ -427,41 +427,39 @@ fun CommunityPlaylistCard(
                     onClick = {
                         scope.launch(Dispatchers.IO) {
                             if (dbPlaylist?.playlist == null) {
-                                database.transaction {
-                                    val playlistEntity =
-                                        PlaylistEntity(
-                                            name = item.playlist.title,
-                                            browseId = item.playlist.id,
-                                            thumbnailUrl = item.playlist.thumbnail,
-                                            remoteSongCount =
-                                                item.playlist.songCountText
-                                                    ?.split(" ")
-                                                    ?.firstOrNull()
-                                                    ?.toIntOrNull(),
-                                            playEndpointParams = item.playlist.playEndpoint?.params,
-                                            shuffleEndpointParams = item.playlist.shuffleEndpoint?.params,
-                                            radioEndpointParams = item.playlist.radioEndpoint?.params,
-                                        ).toggleLike()
-                                    insert(playlistEntity)
-                                    scope.launch(Dispatchers.IO) {
-                                        item.songs
-                                            .ifEmpty {
-                                                YouTube
-                                                    .playlist(item.playlist.id)
-                                                    .completed()
-                                                    .getOrNull()
-                                                    ?.songs
-                                                    .orEmpty()
-                                            }.map { it.toMediaMetadata() }
-                                            .onEach(::insert)
-                                            .mapIndexed { index, song ->
-                                                PlaylistSongMap(
-                                                    songId = song.id,
-                                                    playlistId = playlistEntity.id,
-                                                    position = index,
-                                                    setVideoId = song.setVideoId,
-                                                )
-                                            }.forEach(::insert)
+                                val playlistEntity =
+                                    PlaylistEntity(
+                                        name = item.playlist.title,
+                                        browseId = item.playlist.id,
+                                        thumbnailUrl = item.playlist.thumbnail,
+                                        remoteSongCount =
+                                            item.playlist.songCountText
+                                                ?.split(" ")
+                                                ?.firstOrNull()
+                                                ?.toIntOrNull(),
+                                        playEndpointParams = item.playlist.playEndpoint?.params,
+                                        shuffleEndpointParams = item.playlist.shuffleEndpoint?.params,
+                                        radioEndpointParams = item.playlist.radioEndpoint?.params,
+                                    ).toggleLike()
+                                val songMetadata =
+                                    item.songs
+                                        .ifEmpty {
+                                            YouTube
+                                                .playlist(item.playlist.id)
+                                                .completed()
+                                                .getOrNull()
+                                                ?.songs
+                                                .orEmpty()
+                                        }.map { it.toMediaMetadata() }
+                                if (songMetadata.isNotEmpty()) {
+                                    database.withTransaction {
+                                        insert(playlistEntity)
+                                        songMetadata.onEach { insert(it) }
+                                        val songIds = songMetadata.map { it.id to it.setVideoId }
+                                        val createdPlaylist = database.playlistBlocking(playlistEntity.id)
+                                        if (createdPlaylist != null) {
+                                            addSongsToPlaylist(createdPlaylist, songIds)
+                                        }
                                     }
                                 }
                             } else {
@@ -498,7 +496,7 @@ fun DailyDiscoverCard(
     modifier: Modifier = Modifier,
 ) {
     val database = LocalDatabase.current
-    val playCount by database.getLifetimePlayCount(dailyDiscover.recommendation.id).collectAsState(initial = 0)
+    val playCount by database.getLifetimePlayCount(dailyDiscover.recommendation.id).collectAsStateWithLifecycle(initialValue = 0)
     val menuState = LocalMenuState.current
     val haptic = LocalHapticFeedback.current
 
@@ -637,45 +635,45 @@ fun HomeScreen(
     val listenTogetherManager = LocalListenTogetherManager.current
     val isListenTogetherGuest = listenTogetherManager?.let { it.isInRoom && !it.isHost } ?: false
 
-    val isPlaying by playerConnection.isEffectivelyPlaying.collectAsState()
-    val mediaMetadata by playerConnection.mediaMetadata.collectAsState()
+    val isPlaying by playerConnection.isEffectivelyPlaying.collectAsStateWithLifecycle()
+    val mediaMetadata by playerConnection.mediaMetadata.collectAsStateWithLifecycle()
 
-    val quickPicks by viewModel.quickPicks.collectAsState()
-    val forgottenFavorites by viewModel.forgottenFavorites.collectAsState()
-    val keepListening by viewModel.keepListening.collectAsState()
-    val similarRecommendations by viewModel.similarRecommendations.collectAsState()
-    val accountPlaylists by viewModel.accountPlaylists.collectAsState()
-    val homePage by viewModel.homePage.collectAsState()
-    val explorePage by viewModel.explorePage.collectAsState()
-    val dailyDiscover by viewModel.dailyDiscover.collectAsState()
-    val communityPlaylists by viewModel.communityPlaylists.collectAsState()
+    val quickPicks by viewModel.quickPicks.collectAsStateWithLifecycle()
+    val forgottenFavorites by viewModel.forgottenFavorites.collectAsStateWithLifecycle()
+    val keepListening by viewModel.keepListening.collectAsStateWithLifecycle()
+    val similarRecommendations by viewModel.similarRecommendations.collectAsStateWithLifecycle()
+    val accountPlaylists by viewModel.accountPlaylists.collectAsStateWithLifecycle()
+    val homePage by viewModel.homePage.collectAsStateWithLifecycle()
+    val explorePage by viewModel.explorePage.collectAsStateWithLifecycle()
+    val dailyDiscover by viewModel.dailyDiscover.collectAsStateWithLifecycle()
+    val communityPlaylists by viewModel.communityPlaylists.collectAsStateWithLifecycle()
 
-    val allLocalItems by viewModel.allLocalItems.collectAsState()
-    val allYtItems by viewModel.allYtItems.collectAsState()
-    val speedDialItems by viewModel.speedDialItems.collectAsState()
-    val pinnedSpeedDialItems by viewModel.pinnedSpeedDialItems.collectAsState()
-    val selectedChip by viewModel.selectedChip.collectAsState()
+    val allLocalItems by viewModel.allLocalItems.collectAsStateWithLifecycle()
+    val allYtItems by viewModel.allYtItems.collectAsStateWithLifecycle()
+    val speedDialItems by viewModel.speedDialItems.collectAsStateWithLifecycle()
+    val pinnedSpeedDialItems by viewModel.pinnedSpeedDialItems.collectAsStateWithLifecycle()
+    val selectedChip by viewModel.selectedChip.collectAsStateWithLifecycle()
 
     // Official podcast API data
-    val savedPodcastShows by viewModel.savedPodcastShows.collectAsState()
-    val episodesForLater by viewModel.episodesForLater.collectAsState()
+    val savedPodcastShows by viewModel.savedPodcastShows.collectAsStateWithLifecycle()
+    val episodesForLater by viewModel.episodesForLater.collectAsStateWithLifecycle()
 
-    val isLoading: Boolean by viewModel.isLoading.collectAsState()
+    val isLoading: Boolean by viewModel.isLoading.collectAsStateWithLifecycle()
     val isMoodAndGenresLoading = isLoading && explorePage?.moodAndGenres == null
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
-    val isRandomizing by viewModel.isRandomizing.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
+    val isRandomizing by viewModel.isRandomizing.collectAsStateWithLifecycle()
     val pullRefreshState = rememberPullToRefreshState()
 
     val quickPicksLazyGridState = rememberLazyGridState()
     val forgottenFavoritesLazyGridState = rememberLazyGridState()
 
-    val accountName by viewModel.accountName.collectAsState()
-    val accountImageUrl by viewModel.accountImageUrl.collectAsState()
+    val accountName by viewModel.accountName.collectAsStateWithLifecycle()
+    val accountImageUrl by viewModel.accountImageUrl.collectAsStateWithLifecycle()
     val innerTubeCookie by rememberPreference(InnerTubeCookieKey, "")
     val (randomizeHomeOrder) = rememberPreference(RandomizeHomeOrderKey, true)
 
-    val shouldShowWrappedCard by viewModel.showWrappedCard.collectAsState()
-    val wrappedState by viewModel.wrappedManager.state.collectAsState()
+    val shouldShowWrappedCard by viewModel.showWrappedCard.collectAsStateWithLifecycle()
+    val wrappedState by viewModel.wrappedManager.state.collectAsStateWithLifecycle()
     val isWrappedDataReady = wrappedState.isDataReady
 
     val isLoggedIn =
@@ -733,12 +731,12 @@ fun HomeScreen(
     val currentGridHeight = if (gridItemSize == GridItemSize.BIG) GridThumbnailHeight else SmallGridThumbnailHeight
     val backStackEntry by navController.currentBackStackEntryAsState()
     val scrollToTop =
-        backStackEntry?.savedStateHandle?.getStateFlow("scrollToTop", false)?.collectAsState()
+        backStackEntry?.savedStateHandle?.getStateFlow("scrollToTop", false)?.collectAsStateWithLifecycle()
 
     val wrappedDismissed by backStackEntry
         ?.savedStateHandle
         ?.getStateFlow("wrapped_seen", false)
-        ?.collectAsState() ?: remember { mutableStateOf(false) }
+        ?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
 
     var randomSeed by rememberSaveable { mutableLongStateOf(System.currentTimeMillis()) }
 
@@ -1425,9 +1423,21 @@ fun HomeScreen(
                                 }
 
                                 item(key = "speed_dial_list") {
-                                    val pagerState = rememberPagerState(pageCount = { (items.size + 8) / 9 })
+                                    val targetItemSize = 160.dp
                                     val availableWidth = maxWidth - 32.dp
-                                    val itemWidth = availableWidth / 3
+                                    val columns = (availableWidth / targetItemSize).toInt().coerceAtLeast(3)
+                                    val rows =
+                                        if (columns >= 6) {
+                                            1
+                                        } else if (columns >= 4) {
+                                            2
+                                        } else {
+                                            3
+                                        }
+                                    val itemsPerPage = columns * rows
+                                    val itemWidth = availableWidth / columns
+
+                                    val pagerState = rememberPagerState(pageCount = { (items.size + itemsPerPage - 1) / itemsPerPage })
 
                                     Column(
                                         modifier =
@@ -1442,18 +1452,18 @@ fun HomeScreen(
                                             modifier =
                                                 Modifier
                                                     .fillMaxWidth()
-                                                    .height(itemWidth * 3),
+                                                    .height(itemWidth * rows),
                                         ) { page ->
-                                            val pageStartIndex = page * 9
-                                            val pageItems = items.drop(pageStartIndex).take(9)
+                                            val pageStartIndex = page * itemsPerPage
+                                            val pageItems = items.drop(pageStartIndex).take(itemsPerPage)
 
                                             Column(modifier = Modifier.fillMaxSize()) {
-                                                for (row in 0 until 3) {
+                                                for (row in 0 until rows) {
                                                     Row(modifier = Modifier.fillMaxWidth()) {
-                                                        for (col in 0 until 3) {
-                                                            val itemIndex = row * 3 + col
+                                                        for (col in 0 until columns) {
+                                                            val itemIndex = row * columns + col
 
-                                                            val isRandomizeSlot = (page == 0 && itemIndex == 8)
+                                                            val isRandomizeSlot = (page == 0 && itemIndex == itemsPerPage - 1)
 
                                                             if (isRandomizeSlot) {
                                                                 Box(
@@ -1535,7 +1545,7 @@ fun HomeScreen(
                                                                 val isPinned by database.speedDialDao
                                                                     .isPinned(
                                                                         item.id,
-                                                                    ).collectAsState(initial = false)
+                                                                    ).collectAsStateWithLifecycle(initialValue = false)
 
                                                                 Box(
                                                                     modifier =
@@ -1758,12 +1768,12 @@ fun HomeScreen(
                                     ) {
                                         items(
                                             items = quickPicks.distinctBy { it.id },
-                                            key = { it.id },
+                                            key = { "home_quickpick_${it.id}" },
                                         ) { originalSong ->
                                             // fetch song from database to keep updated
                                             val song by database
                                                 .song(originalSong.id)
-                                                .collectAsState(initial = originalSong)
+                                                .collectAsStateWithLifecycle(initialValue = originalSong)
 
                                             SongListItem(
                                                 song = song!!,
@@ -1864,6 +1874,28 @@ fun HomeScreen(
 
                         HomeSection.DailyDiscover -> {
                             dailyDiscover?.takeIf { it.isNotEmpty() }?.let { discoverList ->
+                                item(key = "daily_discover_title") {
+                                    val title = stringResource(R.string.your_daily_discover)
+                                    NavigationTitle(
+                                        title = title,
+                                        onPlayAllClick = {
+                                            val queueItems =
+                                                discoverList.mapNotNull {
+                                                    (it.recommendation as? SongItem)?.toMediaMetadata()
+                                                }
+
+                                            if (queueItems.isNotEmpty()) {
+                                                playerConnection.playQueue(
+                                                    ListQueue(
+                                                        title = title,
+                                                        items = queueItems.map { it.toMediaItem() },
+                                                    ),
+                                                )
+                                            }
+                                        },
+                                    )
+                                }
+
                                 item(key = "daily_discover_content") {
                                     Box(
                                         modifier =
@@ -2001,7 +2033,7 @@ fun HomeScreen(
                                     ) {
                                         items(
                                             items = accountPlaylists.distinctBy { it.id },
-                                            key = { it.id },
+                                            key = { "home_account_playlist_${it.id}" },
                                         ) { item ->
                                             ytGridItem(item)
                                         }
@@ -2055,11 +2087,11 @@ fun HomeScreen(
                                     ) {
                                         items(
                                             items = forgottenFavorites.distinctBy { it.id },
-                                            key = { it.id },
+                                            key = { "home_forgotten_${it.id}" },
                                         ) { originalSong ->
                                             val song by database
                                                 .song(originalSong.id)
-                                                .collectAsState(initial = originalSong)
+                                                .collectAsStateWithLifecycle(initialValue = originalSong)
 
                                             SongListItem(
                                                 song = song!!,
@@ -2288,7 +2320,7 @@ fun HomeScreen(
                                         ) {
                                             items(
                                                 items = sectionSongs.distinctBy { it.id },
-                                                key = { it.id },
+                                                key = { "home_section_${section.index}_song_${it.id}" },
                                             ) { song ->
                                                 YouTubeListItem(
                                                     item = song,
@@ -2330,27 +2362,27 @@ fun HomeScreen(
                                                                             }
                                                                         }
 
-                                                                        // TODO: this will trigger an error in future kotlin releases, make sure it doesnt 
+                                                                        // TODO: this will trigger an error in future kotlin releases, make sure it doesnt
 
-                                                                        //is AlbumItem -> {
+                                                                        // is AlbumItem -> {
                                                                         //    navController.navigate("album/${song.id}")
-                                                                        //}
+                                                                        // }
 
-                                                                        //is ArtistItem -> {
+                                                                        // is ArtistItem -> {
                                                                         //    navController.navigate("artist/${song.id}")
-                                                                        //}
+                                                                        // }
 
-                                                                        //is PlaylistItem -> {
+                                                                        // is PlaylistItem -> {
                                                                         //    navController.navigate(
                                                                         //        "online_playlist/${song.id.removePrefix("VL")}",
                                                                         //    )
-                                                                        //}
+                                                                        // }
 
-                                                                        //is PodcastItem -> {
+                                                                        // is PodcastItem -> {
                                                                         //    navController.navigate("online_podcast/${song.id}")
-                                                                        //}
+                                                                        // }
 
-                                                                        //is EpisodeItem -> {
+                                                                        // is EpisodeItem -> {
                                                                         //    if (!isListenTogetherGuest) {
                                                                         //        playerConnection.playQueue(
                                                                         //            ListQueue(
@@ -2364,7 +2396,7 @@ fun HomeScreen(
                                                                         //            ),
                                                                         //        )
                                                                         //    }
-                                                                        //}
+                                                                        // }
                                                                     }
                                                                 },
                                                                 onLongClick = {
@@ -2392,7 +2424,10 @@ fun HomeScreen(
                                                     .asPaddingValues(),
                                             modifier = Modifier.animateItem(),
                                         ) {
-                                            items(sectionData.items) { item ->
+                                            items(
+                                                items = sectionData.items.distinctBy { it.id },
+                                                key = { "home_section_${section.index}_item_${it.id}" },
+                                            ) { item ->
                                                 ytGridItem(item)
                                             }
                                         }

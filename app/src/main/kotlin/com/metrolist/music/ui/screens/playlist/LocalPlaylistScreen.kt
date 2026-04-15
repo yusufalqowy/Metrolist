@@ -56,7 +56,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -150,6 +150,7 @@ import com.metrolist.music.viewmodels.LocalPlaylistViewModel
 import com.yalantis.ucrop.UCrop
 import io.ktor.client.plugins.ClientRequestException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import sh.calvin.reorderable.ReorderableItem
@@ -168,11 +169,11 @@ fun LocalPlaylistScreen(
     val database = LocalDatabase.current
     val haptic = LocalHapticFeedback.current
     val playerConnection = LocalPlayerConnection.current ?: return
-    val isPlaying by playerConnection.isEffectivelyPlaying.collectAsState()
-    val mediaMetadata by playerConnection.mediaMetadata.collectAsState()
+    val isPlaying by playerConnection.isEffectivelyPlaying.collectAsStateWithLifecycle()
+    val mediaMetadata by playerConnection.mediaMetadata.collectAsStateWithLifecycle()
 
-    val playlist by viewModel.playlist.collectAsState()
-    val songs by viewModel.playlistSongs.collectAsState()
+    val playlist by viewModel.playlist.collectAsStateWithLifecycle()
+    val songs by viewModel.playlistSongs.collectAsStateWithLifecycle()
     val mutableSongs = remember { mutableStateListOf<PlaylistSong>() }
     val playlistLength =
         remember(songs) {
@@ -191,6 +192,7 @@ fun LocalPlaylistScreen(
     var locked by rememberPreference(PlaylistEditLockKey, defaultValue = true)
 
     val coroutineScope = rememberCoroutineScope()
+    val syncUtils = LocalSyncUtils.current
     val snackbarHostState = remember { SnackbarHostState() }
 
     var isSearching by rememberSaveable { mutableStateOf(false) }
@@ -564,25 +566,33 @@ fun LocalPlaylistScreen(
                     val currentItem by rememberUpdatedState(song)
 
                     fun deleteFromPlaylist() {
+                        // Capture values before deletion — DB entry will be gone afterwards
+                        val browseId = playlist?.playlist?.browseId
+                        val setVideoId = currentItem.map.setVideoId
+                        val songId = currentItem.map.songId
+                        val playlistId = currentItem.map.playlistId
+
                         database.transaction {
-                            coroutineScope.launch {
-                                playlist?.playlist?.browseId?.let { browseId ->
-                                    val setVideoId = getSetVideoId(currentItem.map.songId)
-                                    setVideoId?.setVideoId?.let { setVideoIdValue ->
-                                        YouTube.removeFromPlaylist(
-                                            browseId,
-                                            currentItem.map.songId,
-                                            setVideoIdValue,
-                                        )
+                            move(playlistId, currentItem.map.position, Int.MAX_VALUE)
+                            delete(currentItem.map.copy(position = Int.MAX_VALUE))
+                        }
+
+                        if (browseId != null) {
+                            syncUtils.scheduleRemoveFromPlaylist(
+                                browseId,
+                                songId,
+                                playlistId
+                            ) {
+                                var setVideoId: String? = setVideoId  // already captured before deletion
+                                if (setVideoId == null) {
+                                    for (attempt in 0 until 10) {
+                                        setVideoId = database.getSetVideoId(songId)?.setVideoId
+                                        if (setVideoId != null) break
+                                        delay(3_000L)
                                     }
                                 }
+                                setVideoId
                             }
-                            move(
-                                currentItem.map.playlistId,
-                                currentItem.map.position,
-                                Int.MAX_VALUE,
-                            )
-                            delete(currentItem.map.copy(position = Int.MAX_VALUE))
                         }
                     }
 
@@ -1350,21 +1360,15 @@ fun LocalPlaylistHeader(
                                             .getOrNull() ?: return@launch
                                     database.transaction {
                                         clearPlaylist(playlist.id)
-                                        playlistPage.songs
+                                        val songIds = playlistPage.songs
                                             .map(SongItem::toMediaMetadata)
                                             .onEach(::insert)
-                                            .mapIndexed { position, song ->
-                                                PlaylistSongMap(
-                                                    songId = song.id,
-                                                    playlistId = playlist.id,
-                                                    position = position,
-                                                    setVideoId = song.setVideoId,
-                                                )
-                                            }.forEach(::insert)
+                                            .map { it.id to it.setVideoId }
+                                        addSongsToPlaylist(playlist, songIds)
                                     }
-                                }
-                                scope.launch(Dispatchers.Main) {
-                                    snackbarHostState.showSnackbar(playlistSyncedStr)
+                                    withContext(Dispatchers.Main) {
+                                        snackbarHostState.showSnackbar(playlistSyncedStr)
+                                    }
                                 }
                             },
                             onDelete = onshowDeletePlaylistDialog,

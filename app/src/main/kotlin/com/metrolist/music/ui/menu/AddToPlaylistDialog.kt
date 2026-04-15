@@ -15,7 +15,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,6 +74,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.material3.FilterChip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material3.FilterChipDefaults
+import com.metrolist.music.LocalSyncUtils
 
 @Composable
 fun AddToPlaylistDialog(
@@ -81,10 +82,12 @@ fun AddToPlaylistDialog(
     allowSyncing: Boolean = true,
     initialTextFieldValue: String? = null,
     onGetSong: suspend (Playlist) -> List<String>, // list of song ids. Songs should be inserted to database in this function.
+    onGetSongIds: (suspend () -> List<String>)? = null,
     onDismiss: () -> Unit,
     viewModel: PlaylistsViewModel = hiltViewModel()
 ) {
     val database = LocalDatabase.current
+    val syncUtils = LocalSyncUtils.current
     val coroutineScope = rememberCoroutineScope()
     val (sortType, onSortTypeChange) = rememberEnumPreference(
         AddToPlaylistSortTypeKey,
@@ -94,7 +97,7 @@ fun AddToPlaylistDialog(
         AddToPlaylistSortDescendingKey,
         false
     )
-    val playlists by viewModel.allPlaylists.collectAsState()
+    val playlists by viewModel.allPlaylists.collectAsStateWithLifecycle()
     val (innerTubeCookie) = rememberPreference(InnerTubeCookieKey, "")
     val isLoggedIn = remember(innerTubeCookie) {
         "SAPISID" in parseCookieString(innerTubeCookie)
@@ -110,7 +113,7 @@ fun AddToPlaylistDialog(
         mutableStateOf<Playlist?>(null)
     }
     var songIds by remember {
-        mutableStateOf<List<String>?>(null) // list is not saveable
+        mutableStateOf<List<String>?>(null)
     }
     var duplicates by remember {
         mutableStateOf(emptyList<String>())
@@ -119,24 +122,38 @@ fun AddToPlaylistDialog(
         mutableStateOf<Set<String>>(emptySet())
     }
 
-    LaunchedEffect(isVisible, playlists) {
+    suspend fun addSongsAndSync(targetPlaylist: Playlist, ids: List<String>) {
+        database.addSongsToPlaylist(targetPlaylist, ids.map { it to null }, prepend = true)
+        targetPlaylist.playlist.browseId?.let { plist ->
+            ids.forEach { songId ->
+                syncUtils.registerPendingAdd(plist, songId)
+                try {
+                    YouTube.addToPlaylist(plist, songId)
+                } finally {
+                    syncUtils.unregisterPendingAdd(plist, songId)
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(isVisible, playlists.isEmpty()) {
+        if (!isVisible || playlists.isEmpty()) return@LaunchedEffect
+        if (songIds != null) return@LaunchedEffect
+        withContext(Dispatchers.IO) {
+            songIds = onGetSongIds?.invoke() ?: onGetSong(playlists.first())
+        }
+    }
+    LaunchedEffect(isVisible, songIds, playlists) {
         if (!isVisible) {
-            songIds = null
             playlistsContainingSong = emptySet()
             return@LaunchedEffect
-            }
-               if (playlists.isNotEmpty() && songIds == null) {
-            withContext(Dispatchers.IO) {
-                val ids = onGetSong(playlists.first())
-                songIds = ids
-
-                playlistsContainingSong = playlists
-                    .filter { playlist ->
-                        database.playlistDuplicates(playlist.id, ids).isNotEmpty()
-                    }
-                    .map { it.id }
-                    .toSet()
-            }
+        }
+        val ids = songIds ?: return@LaunchedEffect
+        withContext(Dispatchers.IO) {
+            playlistsContainingSong = playlists
+                .filter { database.playlistDuplicates(it.id, ids).isNotEmpty() }
+                .map { it.id }
+                .toSet()
         }
     }
 
@@ -285,19 +302,15 @@ fun AddToPlaylistDialog(
                         coroutineScope.launch(Dispatchers.IO) {
                             if (songIds == null) {
                                 songIds = onGetSong(playlist)
+                            } else {
+                                onGetSong(playlist)
                             }
                             duplicates = database.playlistDuplicates(playlist.id, songIds!!)
                             if (duplicates.isNotEmpty()) {
                                 showDuplicateDialog = true
                             } else {
                                 onDismiss()
-                                database.addSongToPlaylist(playlist, songIds!!)
-
-                                playlist.playlist.browseId?.let { plist ->
-                                    songIds?.forEach {
-                                        YouTube.addToPlaylist(plist, it)
-                                    }
-                                }
+                                addSongsAndSync(playlist, songIds!!)
                             }
                         }
                     }
@@ -323,12 +336,10 @@ fun AddToPlaylistDialog(
                         onClick = {
                             showDuplicateDialog = false
                             onDismiss()
-                            database.transaction {
-                                addSongToPlaylist(
+                            coroutineScope.launch(Dispatchers.IO) {
+                                addSongsAndSync(
                                     selectedPlaylist!!,
-                                    songIds!!.filter {
-                                        !duplicates.contains(it)
-                                    }
+                                    songIds!!.filter { !duplicates.contains(it) }
                                 )
                             }
                         }
@@ -340,8 +351,8 @@ fun AddToPlaylistDialog(
                         onClick = {
                             showDuplicateDialog = false
                             onDismiss()
-                            database.transaction {
-                                addSongToPlaylist(selectedPlaylist!!, songIds!!)
+                            coroutineScope.launch(Dispatchers.IO) {
+                                addSongsAndSync(selectedPlaylist!!, songIds!!)
                             }
                         }
                     ) {

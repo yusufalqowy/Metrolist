@@ -74,7 +74,7 @@ fun Song.toMediaMetadata() =
         id = song.id,
         title = song.title,
         artists =
-        artists.map {
+        orderedArtists.map {
             MediaMetadata.Artist(
                 id = it.id,
                 name = it.name,
