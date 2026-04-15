@@ -185,8 +185,9 @@ fun OnlinePlaylistScreen(
 
     LaunchedEffect(playlist) {
         val currentPlaylist = playlist ?: return@LaunchedEffect
-        val canPlay = viewModel.requestToPlay && !isListenTogetherGuest && songs.isNotEmpty()
+        val canPlay = viewModel.isRequestToPlay() && !isListenTogetherGuest && songs.isNotEmpty()
         if (!canPlay) return@LaunchedEffect
+        viewModel.consumePlayRequest()
         playerConnection.playQueue(
             YouTubePlaylistQueue(
                 playlistId = currentPlaylist.id,

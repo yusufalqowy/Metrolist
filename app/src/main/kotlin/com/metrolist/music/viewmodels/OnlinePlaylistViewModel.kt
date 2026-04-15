@@ -37,11 +37,10 @@ import javax.inject.Inject
 @HiltViewModel
 class OnlinePlaylistViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    savedStateHandle: SavedStateHandle,
+    private val savedStateHandle: SavedStateHandle,
     private val database: MusicDatabase
 ) : ViewModel() {
     private val playlistId = savedStateHandle.get<String>("playlistId")!!
-    val requestToPlay = savedStateHandle.get<Boolean>("requestToPlay") ?: false
 
     // Check if this is a special podcast playlist (with or without VL prefix)
     private val normalizedPlaylistId = playlistId.removePrefix("VL")
@@ -276,5 +275,10 @@ class OnlinePlaylistViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         proactiveLoadJob?.cancel()
+    }
+    fun isRequestToPlay() = savedStateHandle.get<Boolean>("requestToPlay") ?: false
+
+    fun consumePlayRequest() {
+        savedStateHandle["requestToPlay"] = false
     }
 }
