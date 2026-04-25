@@ -35,7 +35,7 @@ android {
         targetSdk = 36
         versionCode = 146
         versionName = "13.4.2"
-        resValue("string", "app_name", appNameOverride ?: "Metrolist")
+        resValue("string", "app_name", appNameOverride ?: "Haze")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -115,7 +115,7 @@ android {
         }
         debug {
             if (applicationIdOverride == null) {
-                applicationIdSuffix = "haze.debug"
+                applicationIdSuffix = ".haze.debug"
             }
             isDebuggable = true
             if (appNameOverride == null) {
