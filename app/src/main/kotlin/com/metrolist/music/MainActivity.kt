@@ -487,7 +487,7 @@ class MainActivity : ComponentActivity() {
         }
 
         val enableDynamicTheme by rememberPreference(DynamicThemeKey, defaultValue = true)
-        val enableHighRefreshRate by rememberPreference(EnableHighRefreshRateKey, defaultValue = true)
+        val enableHighRefreshRate by rememberPreference(EnableHighRefreshRateKey, defaultValue = false)
 
         LaunchedEffect(enableHighRefreshRate) {
             val window = this@MainActivity.window

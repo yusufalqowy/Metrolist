@@ -141,7 +141,7 @@ fun AppearanceSettings(
     val (enableHighRefreshRate, onEnableHighRefreshRateChange) =
         rememberPreference(
             EnableHighRefreshRateKey,
-            defaultValue = true,
+            defaultValue = false,
         )
     val (selectedThemeColorInt) =
         rememberPreference(
@@ -203,7 +203,7 @@ fun AppearanceSettings(
     val (cropAlbumArt, onCropAlbumArtChange) =
         rememberPreference(
             CropAlbumArtKey,
-            defaultValue = false,
+            defaultValue = true,
         )
     val (playerBackground, onPlayerBackgroundChange) =
         rememberEnumPreference(
@@ -219,7 +219,7 @@ fun AppearanceSettings(
     val (playerButtonsStyle, onPlayerButtonsStyleChange) =
         rememberEnumPreference(
             PlayerButtonsStyleKey,
-            defaultValue = PlayerButtonsStyle.DEFAULT,
+            defaultValue = PlayerButtonsStyle.PRIMARY,
         )
     val (lyricsPosition, onLyricsPositionChange) =
         rememberEnumPreference(
@@ -257,12 +257,12 @@ fun AppearanceSettings(
     val (sliderStyle, onSliderStyleChange) =
         rememberEnumPreference(
             SliderStyleKey,
-            defaultValue = SliderStyle.DEFAULT,
+            defaultValue = SliderStyle.WAVY,
         )
     val (squigglySlider, onSquigglySliderChange) =
         rememberPreference(
             SquigglySliderKey,
-            defaultValue = false,
+            defaultValue = true,
         )
     val (swipeThumbnail, onSwipeThumbnailChange) =
         rememberPreference(

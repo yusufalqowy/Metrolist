@@ -230,7 +230,7 @@ fun BottomSheetPlayer(
         )
     val (hidePlayerThumbnail, onHidePlayerThumbnailChange) = rememberPreference(HidePlayerThumbnailKey, false)
     val (hideStatusBarOnFullscreen) = rememberPreference(HideStatusBarOnFullscreenKey, false)
-    val cropAlbumArt by rememberPreference(CropAlbumArtKey, false)
+    val cropAlbumArt by rememberPreference(CropAlbumArtKey, true)
 
     var showInlineLyrics by rememberSaveable {
         mutableStateOf(false)
@@ -246,7 +246,7 @@ fun BottomSheetPlayer(
     )
     val playerButtonsStyle by rememberEnumPreference(
         key = PlayerButtonsStyleKey,
-        defaultValue = PlayerButtonsStyle.DEFAULT,
+        defaultValue = PlayerButtonsStyle.PRIMARY,
     )
 
     val isSystemInDarkTheme = isSystemInDarkTheme()
@@ -332,8 +332,8 @@ fun BottomSheetPlayer(
     val canSkipNext by playerConnection.canSkipNext.collectAsStateWithLifecycle()
     val isMuted by playerConnection.isMuted.collectAsStateWithLifecycle()
 
-    val sliderStyle by rememberEnumPreference(SliderStyleKey, SliderStyle.DEFAULT)
-    val squigglySlider by rememberPreference(SquigglySliderKey, defaultValue = false)
+    val sliderStyle by rememberEnumPreference(SliderStyleKey, SliderStyle.WAVY)
+    val squigglySlider by rememberPreference(SquigglySliderKey, defaultValue = true)
 
     // Listen Together state (reactive)
     val listenTogetherManager = LocalListenTogetherManager.current
