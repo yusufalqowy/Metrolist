@@ -9,8 +9,6 @@ import androidx.compose.runtime.Immutable
 import com.metrolist.innertube.models.EpisodeItem
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint.WatchEndpointMusicSupportedConfigs.WatchEndpointMusicConfig.Companion.MUSIC_VIDEO_TYPE_ATV
-import com.metrolist.innertube.models.WatchEndpoint.WatchEndpointMusicSupportedConfigs.WatchEndpointMusicConfig.Companion.MUSIC_VIDEO_TYPE_OMV
-import com.metrolist.innertube.models.WatchEndpoint.WatchEndpointMusicSupportedConfigs.WatchEndpointMusicConfig.Companion.MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK
 import com.metrolist.innertube.models.response.PlayerResponse
 import com.metrolist.music.db.entities.Song
 import com.metrolist.music.db.entities.SongEntity
@@ -40,7 +38,6 @@ data class MediaMetadata(
 ) : Serializable {
     val isVideoSong: Boolean
         get() = musicVideoType != null && musicVideoType != MUSIC_VIDEO_TYPE_ATV
-                && musicVideoType != MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK
 
     data class Artist(
         val id: String?,
@@ -52,10 +49,6 @@ data class MediaMetadata(
         val title: String,
     ) : Serializable
 
-    /**
-     * Converts this [MediaMetadata] to a [SongEntity] suitable for Room database persistence.
-     * Maps [musicVideoType] to the [SongEntity.isUploaded] and [SongEntity.isVideo] flags.
-     */
     fun toSongEntity() =
         SongEntity(
             id = id,
@@ -72,7 +65,6 @@ data class MediaMetadata(
             libraryRemoveToken = libraryRemoveToken,
             isVideo = isVideoSong,
             isEpisode = isEpisode,
-            isUploaded = musicVideoType == MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK,
             uploadEntityId = uploadEntityId
         )
 
@@ -91,11 +83,6 @@ data class MediaMetadata(
     )
 }
 
-/**
- * Converts a database [Song] (entity + joined artists/album) into a [MediaMetadata] instance.
- * Reconstructs the [MediaMetadata.musicVideoType] from the persisted boolean flags so that
- * downstream consumers (e.g. the player) can distinguish uploaded, video, and audio-only tracks.
- */
 fun Song.toMediaMetadata() =
     MediaMetadata(
         id = song.id,
@@ -122,19 +109,15 @@ fun Song.toMediaMetadata() =
             )
         },
         explicit = song.explicit,
-        musicVideoType = when {
-            song.isUploaded -> MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK
-            song.isVideo -> MUSIC_VIDEO_TYPE_OMV
-            else -> null
-        },
+        // Use a non-ATV type if isVideo is true to indicate it's a video song
+        musicVideoType = if (song.isVideo) "MUSIC_VIDEO_TYPE_OMV" else null,
         suggestedBy = null,
         isEpisode = song.isEpisode,
-        uploadEntityId = song.uploadEntityId,
     )
 
 /**
  * Converts an InnerTube [SongItem] into a [MediaMetadata] instance for use in the UI and player.
- * Thumbnails are resized to 544x544 for consistency.
+ * Thumbnails are resized to 1080x1080 for high-quality display.
  */
 fun SongItem.toMediaMetadata() =
     MediaMetadata(
@@ -148,7 +131,7 @@ fun SongItem.toMediaMetadata() =
             )
         },
         duration = duration ?: -1,
-        thumbnailUrl = thumbnail.resize(544, 544),
+        thumbnailUrl = thumbnail.resize(1080, 1080),
         album =
         album?.let {
             MediaMetadata.Album(
@@ -181,7 +164,7 @@ fun EpisodeItem.toMediaMetadata() =
             )
         },
         duration = duration ?: -1,
-        thumbnailUrl = thumbnail.resize(544, 544),
+        thumbnailUrl = thumbnail.resize(1080, 1080),
         album = podcast?.let {
             MediaMetadata.Album(
                 id = it.id,
@@ -206,5 +189,5 @@ fun PlayerResponse.VideoDetails.toMediaMetadata() =
             )
         ),
         duration = lengthSeconds.toInt() ?: -1,
-        thumbnailUrl = thumbnail.thumbnails.first().url.resize(544, 544),
+        thumbnailUrl = thumbnail.thumbnails.first().url.resize(1080, 1080),
     )
