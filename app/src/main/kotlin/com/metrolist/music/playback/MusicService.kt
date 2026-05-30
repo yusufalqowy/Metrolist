@@ -73,6 +73,7 @@ import androidx.media3.exoplayer.source.ShuffleOrder.DefaultShuffleOrder
 import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.mkv.MatroskaExtractor
 import androidx.media3.extractor.mp4.FragmentedMp4Extractor
+import androidx.media3.extractor.mp4.Mp4Extractor
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaController
@@ -93,6 +94,7 @@ import com.metrolist.music.constants.AndroidAutoTargetPlaylistKey
 import com.metrolist.music.constants.AudioNormalizationKey
 import com.metrolist.music.constants.AudioOffload
 import com.metrolist.music.constants.AudioQualityKey
+import com.metrolist.music.constants.AudioTrackPlaybackParamsKey
 import com.metrolist.music.constants.AutoDownloadOnLikeKey
 import com.metrolist.music.constants.AutoLoadMoreKey
 import com.metrolist.music.constants.AutoSkipNextOnErrorKey
@@ -179,6 +181,7 @@ import com.metrolist.music.playback.queues.EmptyQueue
 import com.metrolist.music.playback.queues.ListQueue
 import com.metrolist.music.playback.queues.Queue
 import com.metrolist.music.playback.queues.YouTubeQueue
+import com.metrolist.music.playback.queues.YouTubePlaylistQueue
 import com.metrolist.music.playback.queues.filterExplicit
 import com.metrolist.music.playback.queues.filterVideoSongs
 import com.metrolist.music.constants.LoudnessLevel
@@ -194,6 +197,8 @@ import com.metrolist.music.utils.get
 import com.metrolist.music.utils.reportException
 import com.metrolist.music.widget.MetrolistWidgetManager
 import com.metrolist.music.widget.MusicWidgetReceiver
+import com.metrolist.music.widget.PlaylistWidgetReceiver
+import com.metrolist.music.ui.utils.resize
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlin.coroutines.coroutineContext
@@ -640,7 +645,10 @@ class MusicService :
 
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, null)
 
-        audioQuality = dataStore.get(AudioQualityKey).toEnum(com.metrolist.music.constants.AudioQuality.AUTO)
+        audioQuality = dataStore.get(AudioQualityKey)?.let { value ->
+            if (value == "VERY_HIGH") com.metrolist.music.constants.AudioQuality.HIGH
+            else com.metrolist.music.constants.AudioQuality.entries.find { it.name == value }
+        } ?: com.metrolist.music.constants.AudioQuality.AUTO
         playerVolume = MutableStateFlow(dataStore.get(PlayerVolumeKey, 1f).coerceIn(0f, 1f))
 
         // Initialize Google Cast
@@ -694,8 +702,8 @@ class MusicService :
             dataStore.data
                 .map {
                     it[AudioQualityKey]?.let { value ->
-                        com.metrolist.music.constants.AudioQuality.entries
-                            .find { it.name == value }
+                        if (value == "VERY_HIGH") com.metrolist.music.constants.AudioQuality.HIGH
+                        else com.metrolist.music.constants.AudioQuality.entries.find { it.name == value }
                     } ?: com.metrolist.music.constants.AudioQuality.AUTO
                 }.distinctUntilChanged()
                 .collect { newQuality ->
@@ -705,11 +713,11 @@ class MusicService :
                     // Skip reload on first emit (app startup)
                     if (isFirstQualityEmit) {
                         isFirstQualityEmit = false
-                        Timber.tag("MusicService").i("QUALITY INIT: $newQuality")
+                        Timber.tag(TAG).i("QUALITY INIT: $newQuality")
                         return@collect
                     }
 
-                    Timber.tag("MusicService").i("QUALITY CHANGED: $oldQuality -> $newQuality")
+                    Timber.tag(TAG).i("QUALITY CHANGED: $oldQuality -> $newQuality")
 
                     // Reload current song with new quality
                     val mediaId = player.currentMediaItem?.mediaId ?: return@collect
@@ -717,7 +725,7 @@ class MusicService :
                     val wasPlaying = player.isPlaying
                     val currentIndex = player.currentMediaItemIndex
 
-                    Timber.tag("MusicService").i("RELOADING STREAM: $mediaId at position ${currentPosition}ms")
+                    Timber.tag(TAG).i("RELOADING STREAM: $mediaId at position ${currentPosition}ms")
 
                     // Clear cached URL to force fresh fetch
                     songUrlCache.remove(mediaId)
@@ -727,15 +735,15 @@ class MusicService :
                         try {
                             playerCache.removeResource(mediaId)
                             downloadCache.removeResource(mediaId)
-                            Timber.tag("MusicService").d("Cleared player and download cache for $mediaId")
+                            Timber.tag(TAG).d("Cleared player and download cache for $mediaId")
                         } catch (e: Exception) {
-                            Timber.tag("MusicService").e(e, "Failed to clear cache for $mediaId")
+                            Timber.tag(TAG).e(e, "Failed to clear cache for $mediaId")
                         }
                     }
 
                     // Set bypass flag so resolver skips cache checks
                     bypassCacheForQualityChange.add(mediaId)
-                    Timber.tag("MusicService").d("Set bypass cache flag for $mediaId")
+                    Timber.tag(TAG).d("Set bypass cache flag for $mediaId")
 
                     // Reload player at same position
                     player.stop()
@@ -849,6 +857,60 @@ class MusicService :
                 secondaryPlayer?.setOffloadEnabled(useOffload)
             }
 
+        var isFirstAudioTrackParamsEmit = true
+        dataStore.data
+            .map { it[AudioTrackPlaybackParamsKey] ?: true }
+            .distinctUntilChanged()
+            .collectLatest(scope) { useAudioTrackParams ->
+                if (isFirstAudioTrackParamsEmit) {
+                    isFirstAudioTrackParamsEmit = false
+                    return@collectLatest
+                }
+
+                Timber.tag("MusicService").i("AudioTrackPlaybackParams changed to: $useAudioTrackParams")
+
+                val currentIndex = player.currentMediaItemIndex
+                val currentPosition = player.currentPosition
+                val playWhenReady = player.playWhenReady
+                val repeatMode = player.repeatMode
+                val shuffleModeEnabled = player.shuffleModeEnabled
+                val playbackParameters = player.playbackParameters
+                val volume = player.volume
+                val mediaItems = List(player.mediaItemCount) { index ->
+                    player.getMediaItemAt(index)
+                }
+
+                player.removeListener(this)
+                player.removeListener(sleepTimer)
+                playerSilenceProcessors.remove(player)
+                player.release()
+
+                val newPlayer = createExoPlayer()
+                newPlayer.addListener(this@MusicService)
+                newPlayer.addListener(sleepTimer)
+
+                sleepTimer.player = newPlayer
+
+                try {
+                    (mediaSession as MediaSession).player = newPlayer
+                } catch (e: Exception) {
+                    Timber.tag(TAG).e(e, "Failed to swap player in MediaSession")
+                }
+
+                newPlayer.setMediaItems(mediaItems, currentIndex, currentPosition)
+                newPlayer.repeatMode = repeatMode
+                newPlayer.shuffleModeEnabled = shuffleModeEnabled
+                newPlayer.playbackParameters = playbackParameters
+                newPlayer.volume = volume
+                newPlayer.playWhenReady = playWhenReady
+                newPlayer.prepare()
+
+                player = newPlayer
+                _playerFlow.value = newPlayer
+
+                Timber.tag("MusicService").i("Player recreated with AudioTrackPlaybackParams: $useAudioTrackParams")
+            }
+
         dataStore.data
             .map { it[DiscordTokenKey] to (it[EnableDiscordRPCKey] ?: true) }
             .debounce(300)
@@ -858,8 +920,10 @@ class MusicService :
                     discordRpc?.closeRPC()
                 }
                 discordRpc = null
+
                 if (key != null && enabled) {
-                    discordRpc = DiscordRPC(this, key)
+                    discordRpc = DiscordRPC(key)
+                    discordRpc?.start() // Connect immediately to avoid first-play delay
                     if (player.playbackState == Player.STATE_READY && player.playWhenReady) {
                         currentSong.value?.let {
                             updateDiscordRPC(it, true)
@@ -1099,17 +1163,18 @@ class MusicService :
         val silenceProcessor = SilenceDetectorAudioProcessor { handleLongSilenceDetected() }
 
         // Set initial state
-        runBlocking {
+        val useAudioTrackPlaybackParams = runBlocking {
             val skipSilence = dataStore.get(SkipSilenceKey, false)
             val instantSkip = dataStore.get(SkipSilenceInstantKey, false)
             silenceProcessor.instantModeEnabled = skipSilence && instantSkip
+            dataStore.get(AudioTrackPlaybackParamsKey, true)
         }
 
         val player =
             ExoPlayer
                 .Builder(this)
                 .setMediaSourceFactory(createMediaSourceFactory())
-                .setRenderersFactory(createRenderersFactory(eqProcessor, silenceProcessor))
+                .setRenderersFactory(createRenderersFactory(eqProcessor, silenceProcessor, useAudioTrackPlaybackParams))
                 .setHandleAudioBecomingNoisy(true)
                 .setWakeMode(C.WAKE_MODE_NETWORK)
                 .setAudioAttributes(
@@ -3038,8 +3103,6 @@ class MusicService :
         retryJob?.cancel()
         retryJob =
             scope.launch {
-                delay(RETRY_DELAY_MS)
-
                 val currentPosition = player.currentPosition
                 val currentIndex = player.currentMediaItemIndex
                 if (currentIndex == C.INDEX_UNSET) {
@@ -3208,9 +3271,14 @@ class MusicService :
         val activityType = if (advancedMode) dataStore.get(DiscordActivityTypeKey, "listening") else "listening"
         val activityName = if (advancedMode) dataStore.get(DiscordActivityNameKey, "") else ""
 
+        val artistThumbnail = song.artists.firstOrNull()?.thumbnailUrl
+        Timber.d("[DiscordRPC] updateDiscordRPC: song=${song.song.title}, artistThumbnail=${artistThumbnail != null}")
+
         discordUpdateJob?.cancel()
         discordUpdateJob =
             scope.launch {
+                Timber.d("[DiscordRPC] Starting RPC update...")
+                val startTime = System.currentTimeMillis()
                 discordRpc
                     ?.updateSong(
                         song,
@@ -3225,8 +3293,7 @@ class MusicService :
                         activityType,
                         activityName,
                     )?.onFailure {
-                        // Rate limited or error
-                        if (showFeedback) {
+                        if (showFeedback && it !is CancellationException) {
                             Handler(Looper.getMainLooper()).post {
                                 Toast
                                     .makeText(
@@ -3236,8 +3303,95 @@ class MusicService :
                                     ).show()
                             }
                         }
+                        Timber.e("[DiscordRPC] RPC update failed: ${it.message}")
+                    }?.onSuccess {
+                        Timber.d("[DiscordRPC] RPC update completed in ${System.currentTimeMillis() - startTime}ms")
                     }
             }
+        // Fetch missing artist thumbnail independently (not cancelled on song skip)
+        scope.launch {
+            Timber.d("[DiscordRPC] Starting artist thumbnail fetch for ${song.artists.firstOrNull()?.name}")
+            val fetched = fetchArtistThumbnail(song)
+            if (fetched != null) {
+                Timber.d("[DiscordRPC] Artist thumbnail fetched, updating RPC...")
+                discordRpc?.updateSong(
+                    fetched,
+                    player.currentPosition,
+                    player.playbackParameters.speed,
+                    useDetails,
+                    status,
+                    b1Text,
+                    b1Visible,
+                    b2Text,
+                    b2Visible,
+                    activityType,
+                    activityName,
+                )
+                Timber.d("[DiscordRPC] Artist thumbnail RPC update completed")
+            } else {
+                Timber.w("[DiscordRPC] Artist thumbnail fetch returned null")
+            }
+        }
+    }
+
+    private suspend fun fetchArtistThumbnail(song: Song): Song? {
+        val artist = song.artists.firstOrNull()
+        Timber.d("[ArtistFetch] fetchArtistThumbnail: artist=${artist?.name}, thumbnailUrl=${artist?.thumbnailUrl}")
+        
+        if (artist == null) {
+            Timber.w("[ArtistFetch] No artist found")
+            return null
+        }
+        
+        if (artist.thumbnailUrl != null) {
+            Timber.d("[ArtistFetch] Artist already has thumbnail, skipping")
+            return null
+        }
+
+        val browseId = when {
+            artist.channelId != null && !artist.channelId.startsWith("LA")
+                && !artist.channelId.startsWith("FEmusic_library_privately_owned") -> {
+                Timber.d("[ArtistFetch] Using channelId: ${artist.channelId}")
+                artist.channelId
+            }
+            !artist.id.startsWith("LA")
+                && !artist.id.startsWith("FEmusic_library_privately_owned") -> {
+                Timber.d("[ArtistFetch] Using id: ${artist.id}")
+                artist.id
+            }
+            else -> {
+                Timber.w("[ArtistFetch] No valid browseId (id=${artist.id}, channelId=${artist.channelId})")
+                return null
+            }
+        }
+
+        return try {
+            Timber.d("[ArtistFetch] Calling YouTube.artist($browseId)...")
+            val startTime = System.currentTimeMillis()
+            val artistPage = withContext(Dispatchers.IO) {
+                YouTube.artist(browseId).getOrNull()
+            }
+            Timber.d("[ArtistFetch] YouTube.artist completed in ${System.currentTimeMillis() - startTime}ms, result=${artistPage != null}")
+            
+            val thumbnail = artistPage?.artist?.thumbnail?.resize(1080, 1080)
+            Timber.d("[ArtistFetch] Thumbnail from API: ${thumbnail != null}")
+            
+            if (thumbnail != null) {
+                withContext(Dispatchers.IO) {
+                    database.update(artist.copy(thumbnailUrl = thumbnail))
+                }
+                Timber.d("[ArtistFetch] Database updated with thumbnail")
+                val updatedSong = database.getSongById(song.song.id)
+                Timber.d("[ArtistFetch] Returning updated song")
+                updatedSong
+            } else {
+                Timber.w("[ArtistFetch] No thumbnail in artistPage")
+                null
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "[ArtistFetch] Exception during fetch")
+            null
+        }
     }
 
     private fun createDataSourceFactory(): DataSource.Factory {
@@ -3253,11 +3407,19 @@ class MusicService :
                         mediaId,
                         dataSpec.position,
                         if (dataSpec.length >= 0) dataSpec.length else 1,
-                    ) ||
-                    (usePlayerCache && playerCache.isCached(mediaId, dataSpec.position, CHUNK_LENGTH))
+                    )
                 ) {
                     scope.launch(Dispatchers.IO) { recoverSong(mediaId) }
                     return@Factory dataSpec
+                }
+
+                if (usePlayerCache && playerCache.isCached(mediaId, dataSpec.position, CHUNK_LENGTH)) {
+                    songUrlCache[mediaId]?.takeIf { it.second > System.currentTimeMillis() }?.let { (url, _) ->
+                        scope.launch(Dispatchers.IO) { recoverSong(mediaId) }
+                        return@Factory dataSpec.withUri(url.toUri())
+                    }
+                    Timber.tag(TAG).w("Ghost cache entry for $mediaId, re-fetching")
+                    playerCache.removeResource(mediaId)
                 }
 
                 songUrlCache[mediaId]?.takeIf { it.second > System.currentTimeMillis() }?.let {
@@ -3265,10 +3427,10 @@ class MusicService :
                     return@Factory dataSpec.withUri(it.first.toUri())
                 }
             } else {
-                Timber.tag("MusicService").i("BYPASSING CACHE for $mediaId due to quality change")
+                Timber.tag(TAG).i("BYPASSING CACHE for $mediaId due to quality change")
             }
 
-            Timber.tag("MusicService").i("FETCHING STREAM: $mediaId | quality=$audioQuality")
+            Timber.tag(TAG).i("FETCHING STREAM: $mediaId | quality=$audioQuality")
             val playbackData =
                 runBlocking(Dispatchers.IO) {
                     YTPlayerUtils.playerResponseForPlayback(
@@ -3344,7 +3506,7 @@ class MusicService :
 
                 // Clear bypass flag now that we've fetched fresh stream
                 if (bypassCacheForQualityChange.remove(mediaId)) {
-                    Timber.tag("MusicService").d("Cleared bypass cache flag for $mediaId after fresh fetch")
+                    Timber.tag(TAG).d("Cleared bypass cache flag for $mediaId after fresh fetch")
                 }
 
                 val streamUrl = nonNullPlayback.streamUrl
@@ -3360,13 +3522,14 @@ class MusicService :
         DefaultMediaSourceFactory(
             createDataSourceFactory(),
             ExtractorsFactory {
-                arrayOf(MatroskaExtractor(), FragmentedMp4Extractor())
+                arrayOf(MatroskaExtractor(), FragmentedMp4Extractor(), Mp4Extractor())
             },
         )
 
     private fun createRenderersFactory(
         eqProcessor: CustomEqualizerAudioProcessor,
         silenceProcessor: SilenceDetectorAudioProcessor,
+        useAudioTrackPlaybackParams: Boolean,
     ) = object : DefaultRenderersFactory(this) {
         override fun buildAudioSink(
             context: Context,
@@ -3375,7 +3538,7 @@ class MusicService :
         ) = DefaultAudioSink
             .Builder(this@MusicService)
             .setEnableFloatOutput(enableFloatOutput)
-            .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+            .setEnableAudioTrackPlaybackParams(useAudioTrackPlaybackParams)
             .setAudioProcessorChain(
                 DefaultAudioSink.DefaultAudioProcessorChain(
                     // 2. Inject processor into audio pipeline
@@ -3749,12 +3912,124 @@ class MusicService :
                 updateWidgetUI(player.isPlaying)
             }
 
-            MusicWidgetReceiver.ACTION_UPDATE_WIDGET -> {
+            MusicWidgetReceiver.ACTION_UPDATE_WIDGET,
+            PlaylistWidgetReceiver.ACTION_UPDATE_WIDGET -> {
                 updateWidgetUI(player.isPlaying)
+            }
+
+            PlaylistWidgetReceiver.ACTION_PLAY_TARGET -> {
+                handlePlaylistWidgetPlay(intent)
             }
         }
 
         return super.onStartCommand(intent, flags, startId)
+    }
+
+
+    private fun handlePlaylistWidgetPlay(intent: Intent) {
+        scope.launch {
+            try {
+                val queue = withContext(Dispatchers.IO) {
+                    buildPlaylistWidgetQueue(intent)
+                }
+                // Fall back to opening the target in app when it cannot be played directly
+                if (queue == null) {
+                    openPlaylistWidgetTarget(intent)
+                    return@launch
+                }
+                playQueue(queue, playWhenReady = true)
+                updateWidgetUI(true)
+            } catch (t: Throwable) {
+                Timber.tag(TAG).e(t, "Failed to start playlist widget target")
+                openPlaylistWidgetTarget(intent)
+            }
+        }
+    }
+
+    private fun openPlaylistWidgetTarget(source: Intent) {
+        val activityIntent = Intent(this, MainActivity::class.java).apply {
+            action = MainActivity.ACTION_OPEN_WIDGET_TARGET
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(
+                MainActivity.EXTRA_WIDGET_TARGET_TYPE,
+                source.getStringExtra(PlaylistWidgetReceiver.EXTRA_TARGET_TYPE),
+            )
+            putExtra(
+                MainActivity.EXTRA_WIDGET_TARGET_ID,
+                source.getStringExtra(PlaylistWidgetReceiver.EXTRA_TARGET_ID),
+            )
+        }
+        try {
+            startActivity(activityIntent)
+        } catch (t: Throwable) {
+            Timber.tag(TAG).e(t, "Failed to open playlist widget target")
+        }
+    }
+
+    private suspend fun buildPlaylistWidgetQueue(intent: Intent): Queue? {
+        val targetType = intent.getStringExtra(PlaylistWidgetReceiver.EXTRA_TARGET_TYPE) ?: return null
+        val targetId = intent.getStringExtra(PlaylistWidgetReceiver.EXTRA_TARGET_ID).orEmpty()
+        val targetTitle = intent.getStringExtra(PlaylistWidgetReceiver.EXTRA_TARGET_TITLE)
+
+        return when (targetType) {
+            PlaylistWidgetReceiver.TARGET_TYPE_LOCAL -> {
+                if (targetId.isBlank()) return null
+                val songs = database.playlistSongs(targetId).first()
+                if (songs.isEmpty()) return null
+                val playlistName = database.playlist(targetId).first()?.playlist?.name ?: targetTitle
+                ListQueue(
+                    title = playlistName,
+                    items = songs.map { it.song.toMediaItem() },
+                )
+            }
+
+            PlaylistWidgetReceiver.TARGET_TYPE_ONLINE -> {
+                if (targetId.isBlank()) return null
+                val cachedPlaylist = database.playlistByBrowseId(targetId).first()
+                val cachedSongs = cachedPlaylist?.let { database.playlistSongs(it.playlist.id).first() }.orEmpty()
+                if (cachedSongs.isNotEmpty()) {
+                    ListQueue(
+                        title = cachedPlaylist?.playlist?.name ?: targetTitle,
+                        items = cachedSongs.map { it.song.toMediaItem() },
+                    )
+                } else {
+                    YouTubePlaylistQueue(
+                        playlistId = targetId,
+                        playlistTitle = targetTitle,
+                    )
+                }
+            }
+
+            PlaylistWidgetReceiver.TARGET_TYPE_LIKED -> {
+                val songs = database.likedSongsByCreateDateAsc().first()
+                if (songs.isEmpty()) return null
+                ListQueue(
+                    title = getString(R.string.liked_songs),
+                    items = songs.map { it.toMediaItem() },
+                )
+            }
+
+            PlaylistWidgetReceiver.TARGET_TYPE_DOWNLOADED -> {
+                val songs = database.downloadedSongsByCreateDateAsc().first()
+                if (songs.isEmpty()) return null
+                ListQueue(
+                    title = getString(R.string.downloaded_songs),
+                    items = songs.map { it.toMediaItem() },
+                )
+            }
+
+            PlaylistWidgetReceiver.TARGET_TYPE_TOP -> {
+                val limit = targetId.toIntOrNull() ?: 50
+                val songs = database.mostPlayedSongs(LocalDateTime.of(1970, 1, 1, 0, 0), limit = limit).first()
+                if (songs.isEmpty()) return null
+                ListQueue(
+                    title = getString(R.string.my_top),
+                    items = songs.map { it.toMediaItem() },
+                )
+            }
+
+            else -> null
+        }
     }
 
     private fun handleAlarmTrigger(intent: Intent) {

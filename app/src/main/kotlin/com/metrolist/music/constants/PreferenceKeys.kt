@@ -112,10 +112,10 @@ enum class AudioQuality {
     AUTO,
     LOW,
     HIGH,
-    VERY_HIGH,
 }
 
 val AudioOffload = booleanPreferencesKey("enableOffload")
+val AudioTrackPlaybackParamsKey = booleanPreferencesKey("audioTrackPlaybackParams")
 
 val VarispeedKey = booleanPreferencesKey("varispeed")
 
@@ -139,6 +139,7 @@ enum class LoudnessLevel(
 }
 
 val AutoLoadMoreKey = booleanPreferencesKey("autoLoadMore")
+val AutoRadioQueueKey = booleanPreferencesKey("autoRadioQueue")
 val DisableLoadMoreWhenRepeatAllKey = booleanPreferencesKey("disableLoadMoreWhenRepeatAll")
 val AutoDownloadOnLikeKey = booleanPreferencesKey("autoDownloadOnLike")
 val SimilarContent = booleanPreferencesKey("similarContent")
@@ -372,42 +373,34 @@ enum class MyTopFilter {
     YEAR,
     ;
 
-    fun toTimeMillis(): Long =
+    fun toLocalDateTime(): LocalDateTime =
         when (this) {
             DAY -> {
                 LocalDateTime
                     .now()
                     .minusDays(1)
-                    .toInstant(ZoneOffset.UTC)
-                    .toEpochMilli()
             }
 
             WEEK -> {
                 LocalDateTime
                     .now()
                     .minusWeeks(1)
-                    .toInstant(ZoneOffset.UTC)
-                    .toEpochMilli()
             }
 
             MONTH -> {
                 LocalDateTime
                     .now()
                     .minusMonths(1)
-                    .toInstant(ZoneOffset.UTC)
-                    .toEpochMilli()
             }
 
             YEAR -> {
                 LocalDateTime
                     .now()
                     .minusMonths(12)
-                    .toInstant(ZoneOffset.UTC)
-                    .toEpochMilli()
             }
 
             ALL_TIME -> {
-                0
+                LocalDateTime.of(1970, 1, 1, 0, 0)
             }
         }
 }
