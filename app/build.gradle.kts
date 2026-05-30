@@ -96,7 +96,7 @@ android {
         targetSdk = 36
         versionCode = 147
         versionName = "13.4.3"
-        resValue("string", "app_name", appNameOverride ?: "Metrolist")
+        resValue("string", "app_name", appNameOverride ?: "Haze")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -169,6 +169,7 @@ android {
             isCrunchPngs = false
             isDebuggable = false
             applicationIdSuffix = ".haze"
+            signingConfig = signingConfigs.getByName("persistentDebug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
