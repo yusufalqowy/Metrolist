@@ -471,14 +471,14 @@ class MainActivity : ComponentActivity() {
         downloadUtil: DownloadUtil,
         syncUtils: SyncUtils,
     ) {
-        val checkForUpdates by rememberPreference(CheckForUpdatesKey, defaultValue = true)
+        val checkForUpdates by rememberPreference(CheckForUpdatesKey, defaultValue = false)
 
         if (BuildConfig.UPDATER_AVAILABLE) {
             LaunchedEffect(checkForUpdates) {
                 if (checkForUpdates) {
                     withContext(Dispatchers.IO) {
-                        val updatesEnabled = dataStore.get(CheckForUpdatesKey, true)
-                        val notifEnabled = dataStore.get(UpdateNotificationsEnabledKey, true)
+                        val updatesEnabled = dataStore.get(CheckForUpdatesKey, false)
+                        val notifEnabled = dataStore.get(UpdateNotificationsEnabledKey, false)
                         if (!updatesEnabled) return@withContext
 
                         Updater.checkForUpdate().onSuccess { (releaseInfo, hasUpdate) ->
