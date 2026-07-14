@@ -101,8 +101,8 @@ android {
         applicationId = applicationIdOverride ?: baseApplicationId
         minSdk = 26
         targetSdk = 36
-        versionCode = 148
-        versionName = "13.5.0"
+        versionCode = 149
+        versionName = "13.6.0"
         resValue("string", "app_name", appNameOverride ?: "Hazely")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -403,8 +403,6 @@ dependencies {
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.client.encoding)
-    implementation(libs.ktor.server.core)
-    implementation(libs.ktor.server.cio)
     implementation(libs.ktor.serialization.json)
 
     // Protobuf for message serialization (lite version for Android)

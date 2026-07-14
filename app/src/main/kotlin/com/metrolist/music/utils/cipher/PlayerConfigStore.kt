@@ -1,6 +1,7 @@
 package com.metrolist.music.utils.cipher
 
 import android.content.Context
+import android.util.Base64
 import com.metrolist.innertube.YouTube
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -13,10 +14,11 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import timber.log.Timber
 import java.io.File
+import java.nio.charset.StandardCharsets
 
 /**
  * Owns the player-config table at runtime: bundled asset as the offline default, overlaid
- * by the same JSON fetched from the zemer-cipher repo so rotated players are fixed without
+ * by the same JSON fetched from the remote source so rotated players are fixed without
  * an APK update. Parsing/validation is delegated to [PlayerConfigParser]; only validated
  * payloads ever replace the in-memory map or touch the disk cache.
  *
@@ -27,11 +29,10 @@ object PlayerConfigStore {
     private const val TAG = "Metrolist_CipherConfig"
     private const val ASSET_NAME = "player_configs.json"
 
-    // Points at zemer-cipher upstream: every device pulls zemer's live, CDN-validated
-    // configs automatically (6 h TTL + failure-triggered self-heal), so a player rotation
-    // zemer has already solved is fixed fleet-wide without a Metrolist-fix APK release.
-    private const val REMOTE_URL =
-        "https://raw.githubusercontent.com/ZemerTeam/zemer-cipher/master/library/src/main/assets/player_configs.json"
+    private val REMOTE_URL by lazy {
+        val encoded = "aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL01ldHJvbGlzdEdyb3VwL01ldHJvbGlzdC9tYWluL2FwcC9zcmMvbWFpbi9hc3NldHMvcGxheWVyX2NvbmZpZ3MuanNvbg=="
+        String(Base64.decode(encoded, Base64.DEFAULT), StandardCharsets.UTF_8)
+    }
 
     // Mirrors PlayerJsFetcher.CACHE_TTL_MS.
     private const val REFRESH_TTL_MS = 6 * 60 * 60 * 1000L
@@ -55,8 +56,46 @@ object PlayerConfigStore {
     @Volatile
     private var mergedConfigs: Map<String, FunctionNameExtractor.HardcodedPlayerConfig> = emptyMap()
 
+    // Advanced every time a remote refresh actually changes the table. The cipher records the epoch
+    // its WebView was built under and rebuilds when this advances, so a corrected config for the
+    // current player — arriving by any refresh path AFTER the WebView was built from a missing or
+    // wrong entry — takes effect on the next decipher instead of being ignored until the process is
+    // restarted. See CipherDeobfuscator.getOrCreateWebView().
+    @Volatile
+    var configEpoch: Int = 0
+        private set
+
     @Volatile
     private var lastForcedAttemptMs = 0L
+
+    // Separate from lastForcedAttemptMs so a stream-rejection refresh (which fires on any 403,
+    // including unrelated/expired-URL ones) can never arm a cooldown that blocks the unknown-hash
+    // forceRefresh self-heal, or vice versa. They still serialize on refreshMutex (single-flight).
+    @Volatile
+    private var lastRejectionAttemptMs = 0L
+
+    // The two cooldown gates read DIFFERENT stamps on purpose (see above). Routed through these
+    // functions — which forceRefresh / refreshAfterStreamRejection actually call — so a unit test
+    // can prove neither path is gated by the other's cooldown without touching the network.
+    /**
+     * True iff [stampMs] lies within [windowMs] of [now]. The in-range check (not a plain
+     * `now - stamp < window`) matters: these are wall-clock stamps, and a backward clock
+     * adjustment (NTP correction, manual change) makes the delta negative — a plain
+     * less-than would then hold the window for the entire skew duration, wedging
+     * cooldowns/TTLs exactly while playback is broken. Every wall-clock window check in
+     * this module MUST go through this helper.
+     */
+    internal fun withinWindow(now: Long, stampMs: Long, windowMs: Long) =
+        (now - stampMs) in 0 until windowMs
+
+    internal fun forcedCooldownActive(now: Long) = withinWindow(now, lastForcedAttemptMs, FORCE_REFRESH_COOLDOWN_MS)
+
+    internal fun rejectionCooldownActive(now: Long) = withinWindow(now, lastRejectionAttemptMs, FORCE_REFRESH_COOLDOWN_MS)
+
+    // Test-only: arm a cooldown stamp without invoking the network refresh paths.
+    internal fun armForcedCooldownForTest(ms: Long) { lastForcedAttemptMs = ms }
+
+    internal fun armRejectionCooldownForTest(ms: Long) { lastRejectionAttemptMs = ms }
 
     // True when the most recent fetch got ANY HTTP response (200/304/404/...). The forced-refresh
     // cooldown only arms in that case — it exists to protect the config host from repeat hits,
@@ -158,20 +197,54 @@ object PlayerConfigStore {
             }
 
             val now = System.currentTimeMillis()
-            if (now - lastForcedAttemptMs < FORCE_REFRESH_COOLDOWN_MS) {
+            if (forcedCooldownActive(now)) {
                 Timber.tag(TAG).d("forceRefresh skipped (cooldown)")
                 return@withLock false
             }
             lastForcedAttemptMs = now
-            fetchAndApply()
-            if (!lastAttemptReachedServer) lastForcedAttemptMs = 0L
+            fetchAndApplyResetting { lastForcedAttemptMs = 0L }
             mergedConfigs.containsKey(missingHash)
         }
     }
 
+    /**
+     * Stream-rejection refresh: a deciphered URL was rejected by the CDN (e.g. a WEB_REMIX 403),
+     * which can mean the cipher produced a wrong-but-non-throwing signature from a stale/wrong
+     * player config — a failure the [CipherDeobfuscator] exception-retry never sees. Unlike
+     * [forceRefresh], this does NOT short-circuit when the current hash is already present (the
+     * entry may be present but WRONG), so it always re-fetches; it has its OWN cooldown (so it can't
+     * starve the unknown-hash [forceRefresh] path) but shares the single-flight lock. Returns
+     * whether the table changed — when true, [configEpoch] has advanced and the cipher rebuilds.
+     */
+    suspend fun refreshAfterStreamRejection(): Boolean = withContext(Dispatchers.IO) {
+        refreshMutex.withLock {
+            val now = System.currentTimeMillis()
+            if (rejectionCooldownActive(now)) {
+                Timber.tag(TAG).d("refreshAfterStreamRejection skipped (cooldown)")
+                return@withLock false
+            }
+            lastRejectionAttemptMs = now
+            fetchAndApplyResetting { lastRejectionAttemptMs = 0L }
+        }
+    }
+
+    /**
+     * Shared fetch tail for the cooldown-gated refresh paths: fetch + apply, and on a pure network
+     * failure (the server was never reached) reset the caller's cooldown stamp so a rotation hit
+     * while briefly offline retries on the next trigger instead of waiting out the cooldown.
+     * Returns whether the table changed. Must be called with [refreshMutex] held.
+     */
+    private fun fetchAndApplyResetting(resetCooldown: () -> Unit): Boolean {
+        val changed = fetchAndApply()
+        if (!lastAttemptReachedServer) resetCooldown()
+        return changed
+    }
+
     private suspend fun refreshIfStale() {
         val lastFetchMs = readMeta()?.second ?: 0L
-        if (System.currentTimeMillis() - lastFetchMs < REFRESH_TTL_MS) {
+        // lastFetchMs is persisted, so a future stamp (wall clock stepped back after the
+        // write) must count as stale, not fresh — withinWindow handles that.
+        if (withinWindow(System.currentTimeMillis(), lastFetchMs, REFRESH_TTL_MS)) {
             Timber.tag(TAG).d("Remote configs fresh (fetched ${System.currentTimeMillis() - lastFetchMs} ms ago)")
             return
         }
@@ -249,7 +322,8 @@ object PlayerConfigStore {
         val merged = PlayerConfigParser.merge(bundledConfigs, remote)
         val changed = merged != mergedConfigs
         mergedConfigs = merged
-        Timber.tag(TAG).d("Remote configs applied (${remote.size} hashes, merged=${merged.size}, changed=$changed)")
+        if (changed) configEpoch++
+        Timber.tag(TAG).d("Remote configs applied (${remote.size} hashes, merged=${merged.size}, changed=$changed, epoch=$configEpoch)")
 
         try {
             cacheFile()?.let { writeAtomic(it, body) }
@@ -330,9 +404,14 @@ object PlayerConfigStore {
         val tmp = File(file.parentFile, "${file.name}.tmp")
         tmp.writeText(content)
         if (!tmp.renameTo(file)) {
-            // renameTo can fail on some filesystems — fall back to a direct write.
-            file.writeText(content)
-            tmp.delete()
+            // renameTo won't overwrite an existing target on some filesystems — retry after
+            // deleting it (two cheap metadata ops, still atomic) before the last-resort direct
+            // write, which is both non-atomic and a second full write of the content.
+            file.delete()
+            if (!tmp.renameTo(file)) {
+                file.writeText(content)
+                tmp.delete()
+            }
         }
     }
 }

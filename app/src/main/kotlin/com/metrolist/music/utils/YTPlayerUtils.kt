@@ -34,6 +34,11 @@ import com.metrolist.music.utils.cipher.FunctionNameExtractor
 import com.metrolist.music.utils.cipher.PlayerJsFetcher
 import com.metrolist.music.utils.potoken.PoTokenGenerator
 import com.metrolist.music.utils.potoken.PoTokenResult
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import timber.log.Timber
 
@@ -46,6 +51,33 @@ object YTPlayerUtils {
         .build()
 
     private val poTokenGenerator = PoTokenGenerator()
+
+    // Track videoIds whose WEB_REMIX stream URL 403'd on the ExoPlayer GET, so the next resolution
+    // falls through to the fallback clients instead of skipping HEAD validation and looping.
+    private val webRemixFailedIds = java.util.Collections.newSetFromMap(
+        java.util.concurrent.ConcurrentHashMap<String, Boolean>(),
+    )
+
+    fun markWebRemixFailed(videoId: String) {
+        webRemixFailedIds.add(videoId)
+    }
+
+    /**
+     * Cleared when the cipher recovers (player config refreshed after a stream rejection): the
+     * prior WEB_REMIX failures were caused by the stale cipher, so let resolution try WEB_REMIX
+     * again instead of staying pinned to a lower fallback client for the rest of the process.
+     */
+    fun clearWebRemixFailures() {
+        webRemixFailedIds.clear()
+    }
+
+    // Fire-and-forget scope for the cipher config self-heal triggered when a cipher client fails
+    // stream validation during resolution. Only WEB_REMIX skips HEAD validation (so its bad URL
+    // 403s on ExoPlayer and hits MusicService's handler); WEB_CREATOR / TVHTML5 / WEB are validated
+    // here and never reach ExoPlayer, so without this trigger a WEB_REMIX-disabled user would never
+    // self-heal a stale/wrong cipher config. Kept off the resolution coroutine so the (network)
+    // refresh never blocks falling through to the next client.
+    private val cipherRefreshScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val MAIN_CLIENT: YouTubeClient = WEB_REMIX
 
@@ -71,6 +103,27 @@ object YTPlayerUtils {
     /** Client names disabled by the user in Settings → Stream sources. Updated reactively by MusicService. */
     @Volatile
     var disabledStreamClients: Set<String> = emptySet()
+
+    // A stable video id used only to warm the local BotGuard token generator; the token is
+    // discarded. PoToken generation is a local WebView computation (no YouTube /player call), so
+    // this triggers no network request to YouTube for the video itself.
+    private const val POTOKEN_WARMUP_VIDEO_ID = "jNQXAC9IVRw"
+
+    /**
+     * Best-effort warm-up of the PoToken/BotGuard generator (BotGuard cold-start is ~2–5s) so the
+     * first real playback skips it. Requires a session (visitorData); the caller should gate this on
+     * visitorData being ready. The cipher WebView warm-up is separate (CipherDeobfuscator.prewarm)
+     * since it needs no session. Failure is swallowed; playback falls back to lazy init unchanged.
+     */
+    suspend fun prewarmPoToken() {
+        val sessionId = YouTube.visitorData ?: return
+        if (!MAIN_CLIENT.useWebPoTokens) return
+        runCatching {
+            withContext(Dispatchers.IO) {
+                poTokenGenerator.getWebClientPoToken(POTOKEN_WARMUP_VIDEO_ID, sessionId)
+            }
+        }.onFailure { Timber.tag(TAG).w(it, "PoToken prewarm skipped: ${it.message}") }
+    }
 
     data class PlaybackData(
         val audioConfig: PlayerResponse.PlayerConfig.AudioConfig?,
@@ -149,7 +202,12 @@ object YTPlayerUtils {
             // Age-restricted: use WEB_CREATOR directly (no NewPipe needed from here)
             Timber.tag(logTag).d("Age-restricted detected, using WEB_CREATOR")
             Timber.tag(TAG).i("Age-restricted: using WEB_CREATOR for videoId=$videoId")
-            val creatorResponse = YouTube.player(videoId, playlistId, WEB_CREATOR, null, null).getOrNull()
+            val creatorResponse = YouTube.player(videoId, playlistId, WEB_CREATOR, null, null)
+                .onFailure {
+                    // Distinguish thrown request/parse failures from genuine playability
+                    // rejections (both otherwise surface as a null response downstream).
+                    Timber.tag(logTag).e(it, "player() request FAILED for WEB_CREATOR")
+                }.getOrNull()
             if (creatorResponse?.playabilityStatus?.status == "OK") {
                 Timber.tag(logTag).d("WEB_CREATOR works for age-restricted content")
                 mainPlayerResponse = creatorResponse
@@ -233,7 +291,10 @@ object YTPlayerUtils {
                 // Skip signature timestamp for age-restricted (faster), use it for normal content
                 val clientSigTimestamp = if (wasOriginallyAgeRestricted) null else signatureTimestamp.timestamp
                 streamPlayerResponse =
-                    YouTube.player(videoId, playlistId, client, clientSigTimestamp, clientPoToken).getOrNull()
+                    YouTube.player(videoId, playlistId, client, clientSigTimestamp, clientPoToken)
+                        .onFailure {
+                            Timber.tag(logTag).e(it, "player() request FAILED for %s", client.clientName)
+                        }.getOrNull()
             }
 
             // process current client response
@@ -393,6 +454,19 @@ object YTPlayerUtils {
                     break
                 }
 
+                // WEB_REMIX authenticated CDN URLs can 403 on HEAD yet serve fine on the byte-range
+                // GET that ExoPlayer makes. Skip HEAD validation for the main client and let ExoPlayer
+                // try directly, UNLESS this videoId already 403'd on GET (markWebRemixFailed) — then
+                // fall through to the fallback clients. Saves a validateStatus round-trip per resolve.
+                if (clientIndex == -1 && currentClient.clientName == "WEB_REMIX" &&
+                    !webRemixFailedIds.contains(videoId)
+                ) {
+                    Timber.tag(logTag).d("WEB_REMIX — skipping HEAD validation, letting ExoPlayer try directly")
+                    Timber.tag(TAG).i("Playback: client=${currentClient.clientName}, videoId=$videoId")
+                    successClient = currentClient.clientName
+                    break
+                }
+
                 if (validateStatus(streamUrl)) {
                     // working stream found
                     Timber.tag(logTag).d("Stream validated successfully with client: ${currentClient.clientName}")
@@ -402,6 +476,17 @@ object YTPlayerUtils {
                     break
                 } else {
                     Timber.tag(logTag).d("Stream validation failed for client: ${currentClient.clientName}")
+                    // A cipher client failing validation can mean a wrong-but-non-throwing signature
+                    // from a stale/wrong player config — caught here at resolution, so it never
+                    // reaches ExoPlayer and MusicService's 403 handler never fires. Ask the cipher to
+                    // re-fetch its config (rate-limited, off this coroutine); if it changes, the
+                    // cipher rebuilds its WebView and the next resolution returns to this client — no
+                    // app restart. This is what covers WEB_CREATOR/TVHTML5/WEB-only users.
+                    if (needsNTransform) {
+                        cipherRefreshScope.launch {
+                            if (CipherDeobfuscator.onStreamRejected()) clearWebRemixFailures()
+                        }
+                    }
                 }
             } else {
                 Timber.tag(logTag).d("Player response status not OK: ${streamPlayerResponse?.playabilityStatus?.status}, reason: ${streamPlayerResponse?.playabilityStatus?.reason}")
