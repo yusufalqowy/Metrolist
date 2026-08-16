@@ -103,7 +103,7 @@ android {
         targetSdk = 36
         versionCode = 152
         versionName = "13.6.3"
-        resValue("string", "app_name", appNameOverride ?: "Metrolist")
+        resValue("string", "app_name", appNameOverride ?: "Hazely")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -180,6 +180,8 @@ android {
             isShrinkResources = true
             isCrunchPngs = false
             isDebuggable = false
+            applicationIdSuffix = ".haze"
+            signingConfig = signingConfigs.getByName("persistentDebug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -187,11 +189,11 @@ android {
         }
         debug {
             if (applicationIdOverride == null) {
-                applicationIdSuffix = ".debug"
+                applicationIdSuffix = ".haze.debug"
             }
             isDebuggable = true
             if (appNameOverride == null) {
-                resValue("string", "app_name", "Metrolist Debug")
+                resValue("string", "app_name", "Hazely Debug")
             }
             signingConfig =
                 if (workflowDebugKeystoreFile != null) {

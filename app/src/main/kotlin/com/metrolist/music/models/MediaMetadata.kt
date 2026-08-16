@@ -9,6 +9,7 @@ import androidx.compose.runtime.Immutable
 import com.metrolist.innertube.models.EpisodeItem
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint.WatchEndpointMusicSupportedConfigs.WatchEndpointMusicConfig.Companion.MUSIC_VIDEO_TYPE_ATV
+import com.metrolist.innertube.models.response.PlayerResponse
 import com.metrolist.music.db.entities.Song
 import com.metrolist.music.db.entities.SongEntity
 import com.metrolist.music.ui.utils.resize
@@ -175,4 +176,18 @@ fun EpisodeItem.toMediaMetadata() =
         isEpisode = true,
         libraryAddToken = libraryAddToken,
         libraryRemoveToken = libraryRemoveToken,
+    )
+
+fun PlayerResponse.VideoDetails.toMediaMetadata() =
+    MediaMetadata(
+        id = videoId,
+        title = title ?: "-",
+        artists = listOf(
+            MediaMetadata.Artist(
+                id = channelId,
+                name = author ?: "-",
+            )
+        ),
+        duration = lengthSeconds.toInt() ?: -1,
+        thumbnailUrl = thumbnail.thumbnails.first().url.resize(1080, 1080),
     )

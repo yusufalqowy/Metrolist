@@ -37,7 +37,7 @@ import javax.inject.Inject
 @HiltViewModel
 class OnlinePlaylistViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    savedStateHandle: SavedStateHandle,
+    private val savedStateHandle: SavedStateHandle,
     private val database: MusicDatabase
 ) : ViewModel() {
     private val playlistId = savedStateHandle.get<String>("playlistId")!!
@@ -213,7 +213,7 @@ class OnlinePlaylistViewModel @Inject constructor(
                 if (_isLoadingMore.value) {
                     // Wait until manual load is finished, then re-evaluate
                     // This simple break and restart strategy from loadMoreSongs is preferred
-                    break 
+                    break
                 }
 
                 YouTube.playlistContinuation(currentProactiveToken)
@@ -223,7 +223,7 @@ class OnlinePlaylistViewModel @Inject constructor(
                         playlistSongs.value = applySongFilters(currentSongs)
                         currentProactiveToken = playlistContinuationPage.continuation
                         // Update the class-level continuation for manual loadMore if needed
-                        this@OnlinePlaylistViewModel.continuation = currentProactiveToken 
+                        this@OnlinePlaylistViewModel.continuation = currentProactiveToken
                     }.onFailure { throwable ->
                         reportException(throwable)
                         currentProactiveToken = null // Stop proactive loading on error
@@ -235,7 +235,7 @@ class OnlinePlaylistViewModel @Inject constructor(
 
     fun loadMoreSongs() {
         if (_isLoadingMore.value) return // Already loading more (manually)
-        
+
         val tokenForManualLoad = continuation ?: return // No more songs to load
 
         proactiveLoadJob?.cancel() // Cancel proactive loading to prioritize manual scroll
@@ -275,5 +275,10 @@ class OnlinePlaylistViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         proactiveLoadJob?.cancel()
+    }
+    fun isRequestToPlay() = savedStateHandle.get<Boolean>("requestToPlay") ?: false
+
+    fun consumePlayRequest() {
+        savedStateHandle["requestToPlay"] = false
     }
 }

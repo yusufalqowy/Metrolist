@@ -147,11 +147,11 @@ private fun getMediaItems(
     val timeline = player.currentTimeline
     val currentIndex = player.currentMediaItemIndex
     val shuffleModeEnabled = player.shuffleModeEnabled
-    
+
     val currentMediaItem = try {
         player.currentMediaItem
     } catch (e: Exception) { null }
-    
+
     val previousMediaItem = if (swipeThumbnail && !timeline.isEmpty) {
         val previousIndex = timeline.getPreviousWindowIndex(
             currentIndex,
@@ -176,7 +176,7 @@ private fun getMediaItems(
 
     val items = listOfNotNull(previousMediaItem, currentMediaItem, nextMediaItem)
     val currentMediaIndex = items.indexOf(currentMediaItem)
-    
+
     return MediaItemsData(items, currentMediaIndex)
 }
 
@@ -219,18 +219,18 @@ fun Thumbnail(
     val swipeThumbnailPref by rememberPreference(SwipeThumbnailKey, true)
     val swipeThumbnail = swipeThumbnailPref && !isListenTogetherGuest
     val hidePlayerThumbnail by rememberPreference(HidePlayerThumbnailKey, false)
-    val cropAlbumArt by rememberPreference(CropAlbumArtKey, false)
+    val cropAlbumArt by rememberPreference(CropAlbumArtKey, true)
     val playerBackground by rememberEnumPreference(
         key = PlayerBackgroundStyleKey,
         defaultValue = PlayerBackgroundStyle.DEFAULT
     )
-    
+
     // Pre-calculate text color based on background style
     val textBackgroundColor = getTextColor(playerBackground)
-    
+
     // Grid state
     val thumbnailLazyGridState = rememberLazyGridState()
-    
+
     // Calculate media items data - memoized
     val mediaItemsData by remember(
         playerConnection.player.currentMediaItemIndex,
@@ -242,7 +242,7 @@ fun Thumbnail(
             getMediaItems(playerConnection.player, swipeThumbnail)
         }
     }
-    
+
     val mediaItems = mediaItemsData.items
     val currentMediaIndex = mediaItemsData.currentIndex
 
@@ -341,7 +341,7 @@ fun Thumbnail(
                         textColor = textBackgroundColor
                     )
                 }
-                
+
                 // Thumbnail content
                 BoxWithConstraints(
                     contentAlignment = Alignment.Center,
@@ -367,12 +367,12 @@ fun Thumbnail(
                             showSeekEffect = showEffect
                         }
                     }
-                    
+
                     // Derive scroll enabled state to prevent unnecessary recomposition
                     val isScrollEnabled by remember(swipeThumbnail) {
                         derivedStateOf { swipeThumbnail && isPlayerExpanded() }
                     }
-                    
+
                     LazyHorizontalGrid(
                         state = thumbnailLazyGridState,
                         rows = GridCells.Fixed(1),
@@ -386,7 +386,7 @@ fun Thumbnail(
                     ) {
                         items(
                             items = mediaItems,
-                            key = { item -> 
+                            key = { item ->
                                 item.mediaId.ifEmpty { "unknown_${item.hashCode()}" }
                             }
                         ) { item ->
@@ -575,7 +575,7 @@ private fun ThumbnailItem(
                     cropArtwork = cropAlbumArt
                 )
             }
-            
+
             // Cast button at top-right corner of thumbnail
             CastButton(
                 modifier = Modifier

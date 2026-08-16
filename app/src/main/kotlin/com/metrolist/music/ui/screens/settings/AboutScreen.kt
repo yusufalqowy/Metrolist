@@ -222,7 +222,7 @@ fun AboutScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val wannaPlayStr = stringResource(R.string.wanna_play_favorite_song)
     val yeahStr = stringResource(R.string.yeah)
-    
+
     val windowInsets = LocalPlayerAwareWindowInsets.current
 
     Column(
@@ -252,25 +252,23 @@ fun AboutScreen(
                     .fillMaxWidth()
                     .padding(24.dp)
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Image(
-                        painter = painterResource(R.drawable.ic_logo_oval),
-                        contentDescription = null,
-                        modifier = Modifier.size(84.dp)
-                    )
-                    Image(
-                        painter = painterResource(R.drawable.about_icon),
-                        contentDescription = stringResource(R.string.metrolist),
-                        modifier = Modifier.size(64.dp)
-                    )
-                }
-        
+                Image(
+                    painter = painterResource(R.drawable.about_icon),
+                    contentDescription = stringResource(R.string.app_name),
+                    colorFilter = ColorFilter.tint(
+                        color = MaterialTheme.colorScheme.primary,
+                        blendMode = BlendMode.SrcIn,
+                    ),
+                    modifier = Modifier.size(64.dp)
+                )
+
                 Spacer(Modifier.width(20.dp))
-        
+
                 Column {
-                    val metrolistName = stringResource(R.string.metrolist)
+                    val metrolistName = stringResource(R.string.app_name)
                         .lowercase(Locale.getDefault())
                         .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+                        .replace(" debug", "", true)
 
                     Text(
                         text = metrolistName,
@@ -279,9 +277,16 @@ fun AboutScreen(
                         color = MaterialTheme.colorScheme.onSurface,
                         letterSpacing = (-0.5).sp
                     )
-            
+
+                    Text(
+                        text = "forked from Metrolist",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
                     Spacer(Modifier.height(8.dp))
-            
+
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -297,7 +302,7 @@ fun AboutScreen(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
-                        
+
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
@@ -346,7 +351,7 @@ fun AboutScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     var leadClickCount by remember(leadDeveloper.name) { mutableIntStateOf(0) }
-            
+
                     ContributorAvatar(
                         avatarUrl = leadDeveloper.avatarUrl,
                         sizeDp = 110,
@@ -385,13 +390,13 @@ fun AboutScreen(
                         )
                     }
                 }
-                
+
                 Spacer(Modifier.height(24.dp))
-                
+
                 DeveloperSocials(uriHandler)
-                
+
                 Spacer(Modifier.height(16.dp))
-                
+
                 Button(
                     onClick = { uriHandler.openUri("https://buymeacoffee.com/mostafaalagamy") },
                     modifier = Modifier.fillMaxWidth(),
@@ -409,7 +414,7 @@ fun AboutScreen(
         }
 
         Spacer(Modifier.height(32.dp))
-        
+
         // Collaborators section - back to Material3SettingsGroup
         Material3SettingsGroup(
             title = stringResource(R.string.credits_collaborators_section),
@@ -491,14 +496,14 @@ fun AboutScreen(
         )
 
         Spacer(Modifier.height(48.dp))
-        
+
         Text(
             text = stringResource(R.string.stands_with_palestine),
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        
+
         Spacer(Modifier.height(48.dp))
     }
 

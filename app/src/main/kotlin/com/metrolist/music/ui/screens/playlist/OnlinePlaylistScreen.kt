@@ -181,6 +181,21 @@ fun OnlinePlaylistScreen(
         }
     }
 
+    LaunchedEffect(playlist) {
+        val currentPlaylist = playlist ?: return@LaunchedEffect
+        val canPlay = viewModel.isRequestToPlay() && !isListenTogetherGuest && songs.isNotEmpty()
+        if (!canPlay) return@LaunchedEffect
+        viewModel.consumePlayRequest()
+        playerConnection.playQueue(
+            YouTubePlaylistQueue(
+                playlistId = currentPlaylist.id,
+                playlistTitle = currentPlaylist.title,
+                initialSongs = songs,
+                initialContinuation = viewModel.continuation,
+            )
+        )
+    }
+
     if (isSearching) {
         BackHandler {
             isSearching = false

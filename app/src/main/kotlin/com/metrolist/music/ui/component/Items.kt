@@ -1,7 +1,7 @@
 /**
  * Metrolist Project (C) 2026
  * Licensed under GPL-3.0 | See git history for contributors
- * 
+ *
  * Optimized for minimal recomposition during navigation
  */
 
@@ -1461,8 +1461,8 @@ fun ItemThumbnail(
     isSelected: Boolean = false,
     thumbnailRatio: Float = 1f
 ) {
-    val cropAlbumArt by rememberPreference(CropAlbumArtKey, false)
-    
+    val cropAlbumArt by rememberPreference(CropAlbumArtKey, true)
+
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
@@ -1543,8 +1543,8 @@ fun LocalThumbnail(
     playButtonVisible: Boolean = false,
     thumbnailRatio: Float = 1f
 ) {
-    val cropAlbumArt by rememberPreference(CropAlbumArtKey, false)
-    
+    val cropAlbumArt by rememberPreference(CropAlbumArtKey, true)
+
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
@@ -1649,8 +1649,8 @@ fun PlaylistThumbnail(
     shape: Shape,
     cacheKey: String? = null
 ) {
-    val cropAlbumArt by rememberPreference(CropAlbumArtKey, false)
-    
+    val cropAlbumArt by rememberPreference(CropAlbumArtKey, true)
+
     when (thumbnails.size) {
         0 -> Box(
             contentAlignment = Alignment.Center,
